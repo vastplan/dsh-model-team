@@ -248,5 +248,4 @@ model-team/
 
 ## 许可
 
-仓库公开，但未附开源许可证（`package.json` 为 `private`，也无意发布到 npm）；
-如需复用，请先联系作者。
+[MIT License](LICENSE) © 2026 model-team contributors。
