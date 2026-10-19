@@ -4,6 +4,9 @@
 每家模型在会话输入框上方占一行，实时显示「思考 / 工具 / 回答 / 完成」；
 打开「保存数据」后，结果进 SQLite 账本，可出周报与静态报告。
 
+插件同时注册 `model-team` 技能：安装后 DSH 自动发现它，任务命中多模型审计/分叉/推理时，
+模型会按技能里的口径调用 `model_team`，不需要手动加载，也不用再往 `~/.dsh/skills` 放文件。
+
 ![执行中的多模型进度窗](docs/images/progress-dock.webp)
 
 ## 它解决什么问题
@@ -14,6 +17,8 @@
 - **执行组带主备**：一个组 = 同一逻辑模型的多个厂商路由，主力失败自动换厂商，而不是整组失败。
 - **结果可复查**：账本、每跳会话 JSON、周报、自包含 HTML 报告，都是本地文件。
 - **进度可见**：逐模型一行，带阶段、耗时与最新输出；运行中可单家「停止」，整场可取消。
+- **技能随插件自动注册**：`model-team` 技能由插件启动时注册，装好就在 DSH 的技能目录里；
+  任务命中时模型按技能说明自动调用 `model_team`。开发本仓库时，项目级 `.dsh/skills` 会自动覆盖内置版。
 
 ## 界面
 
@@ -176,9 +181,12 @@ model_team_weekly(days: 7)
 （provider `vastplan-model-team`，bundled rank 600）。
 
 - 装好插件，模型就能看到技能说明，不需要再往 `~/.dsh/skills` 放一份；
-- 项目级 `.dsh/skills`（rank 100）/ 用户级（rank 400）里的同名技能会**压过**内置版；
-- 本仓库的 [`.dsh/skills/model-team/SKILL.md`](.dsh/skills/model-team/SKILL.md) 与内置版逐字同源，
-  用于覆盖内置版做本地校验。
+- 项目级 `.dsh/skills`（rank 100）/ 用户级（rank 400）里的同名技能会**压过**内置版。
+
+**开发这个插件时**：本仓库自带的 [`.dsh/skills/model-team/SKILL.md`](.dsh/skills/model-team/SKILL.md)
+会被 DSH 自动发现并优先采用（项目级 rank 100 压过内置的 600）——你在这个工作区让 agent
+做多模型审计，它会直接按这份技能调用 `model_team`，不需要手动加载。两份内容必须同步，
+否则内置版与项目版会分叉（`cp assets/model-team.md .dsh/skills/model-team/SKILL.md`）。
 
 技能里写清了调用参数、Task Packet 写法、点名语义、账本口径与当前限制。
 
