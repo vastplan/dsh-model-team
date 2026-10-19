@@ -1,0 +1,14 @@
+# 多模型团队：只有一行 Host 插件。
+#
+# Client 半不是独立行：`package.json` 的 `dsh.client` 元数据会把它自动发现成
+# 本包的浏览器 bundle（模块 id = 包名）。多挂一行会注册第二个同 id 模块并报冲突。
+#
+# 账本用 `node:sqlite` 独立库文件（$DSH_HOME/model-team/ledger.db），
+# 不挂任何存储后端——之前挂重复的 storage-domain 会让 Host 以 duplicate-mount 致命退出。
+- insert:
+    - id: model-team
+      name: '@vastplan/model-team'
+      config:
+        toolName: model_team
+        reportModel: ''
+        models: []

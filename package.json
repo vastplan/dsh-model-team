@@ -1,0 +1,48 @@
+{
+  "name": "@vastplan/model-team",
+  "version": "0.2.0",
+  "private": true,
+  "description": "多模型团队：用 DSH 的 LLM 服务并发调用各已注册模型，做事后审计、设计分叉与专责推理；带账本、周报与插件页面。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./typert": "./typert.js",
+    "./client": "./client.js",
+    "./assets/*.md": "./assets/*.md",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "typert.js",
+    "client.js",
+    "src/*.js",
+    "assets/*.md",
+    "docs/images/*.webp",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-jobs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "zod": "^4.4.3"
+  }
+}

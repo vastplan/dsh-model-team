@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>多模型团队 · 页面预览</title>
+<style>
+:root {
+  --dsw-alias-bg-base: #0f1012;
+  --dsw-alias-bg-layer-2: #17181c;
+  --dsw-alias-label-primary: #e8e9ec;
+  --dsw-alias-label-secondary: #9aa0a8;
+  --dsw-alias-label-tertiary: #6e747c;
+  --dsw-alias-border-l1: #2a2d33;
+  --dsw-alias-border-l2: #353a42;
+  --dsw-alias-border-l3: #41474f;
+  --dsw-alias-border-l4: #4d545d;
+  --dsw-alias-brand-primary: #4c8dff;
+  --dsw-alias-brand-primary-new-color: #4c8dff;
+  --dsw-alias-interactive-bg-hover: #22252b;
+  --dsw-alias-state-error-primary: #f85149;
+  --dsw-alias-state-primary: #4c8dff;
+  --dsw-alias-state-success-primary: #3fb950;
+  --dsw-alias-switch-thumb: #ffffff;
+  --dsw-radius-sm: 6px;
+  --dsw-radius-md: 8px;
+  --dsw-radius-lg: 12px;
+}
+
+html, body { margin: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px; line-height: 20px; }
+.preview-shell { max-width: 760px; margin: 0 auto; padding: 32px 24px 64px; }
+.preview-note { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px;
+  border-left: 2px solid var(--dsw-alias-border-l3); padding-left: 10px; margin: 0 0 24px; }
+.preview-cap { color: var(--dsw-alias-label-tertiary); font-size: 12px; margin: 28px 0 8px; }
+
+/* ── 以下与 client.js 的 css 常量同源 ── */
+
+/* ── 以下是被调样式：官方设置页的「行」布局 ───────────────────────────── */
+.mt-root { display: flex; flex-direction: column; max-width: 720px; }
+.mt-pageTitle { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
+.mt-intro { color: var(--dsw-alias-label-secondary); margin: 4px 0 0; font-size: 13px; line-height: 20px; }
+
+/* 官方设置页：每行 padding 16px 0 + .5px 底边框 */
+.mt-root > header { padding-bottom: 8px; }
+.mt-row { display: flex; flex-direction: column; gap: 8px; padding: 16px 0;
+  border-bottom: .5px solid var(--dsw-alias-border-l1); }
+.mt-row:last-child { border-bottom: 0; }
+.mt-rowTitle { margin: 0; font-size: 14px; font-weight: 400; line-height: 22px; }
+.mt-rowHint { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+
+/* 行内两栏：左文字右控件（官方设置的常规形态） */
+.mt-rowSplit { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.mt-rowMain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mt-rowControl { flex: none; display: flex; align-items: center; gap: 8px; }
+
+/* 控件：官方按钮 ≈ 28px 高、.5px 边框、radius-md */
+.mt-button { height: 28px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;
+  gap: 4px; border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary);
+  font-family: inherit; font-size: 13px; line-height: 20px; cursor: pointer;
+  transition: background var(--ds-transition-duration) var(--ds-ease-in-out); }
+.mt-button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.mt-button:disabled { opacity: .5; cursor: default; }
+.mt-buttonGhost { border-color: transparent; background: transparent; color: var(--dsw-alias-label-secondary); }
+.mt-buttonGhost:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.mt-buttonDanger { color: var(--dsw-alias-state-error-primary); }
+.mt-buttonDanger:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+
+.mt-select, .mt-input { height: 28px; padding: 0 8px; border: .5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 13px; line-height: 20px;
+  outline: none; }
+.mt-select:focus, .mt-input:focus { border-color: var(--dsw-alias-border-l4); }
+.mt-select { min-width: 180px; max-width: 100%; flex: 1; text-overflow: ellipsis; }
+
+/* 自定义下拉：渲染成按钮 + 浮层，不用原生 select（macOS 原生外观与深色主题冲突） */
+.mt-dd { position: relative; display: inline-flex; min-width: 0; }
+.mt-cand .mt-dd { flex: 1; min-width: 0; }
+.mt-ddButton { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px;
+  padding: 0 8px; border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary);
+  font-family: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer;
+  transition: background var(--ds-transition-duration) var(--ds-ease-in-out); }
+.mt-ddButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.mt-ddButton:disabled { opacity: .5; cursor: default; }
+.mt-ddButton[aria-expanded="true"] { border-color: var(--dsw-alias-border-l4); }
+.mt-ddValue { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-ddPlaceholder { color: var(--dsw-alias-label-tertiary); }
+.mt-ddChevron { flex: none; width: 12px; height: 12px; color: var(--dsw-alias-label-tertiary);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out); }
+.mt-ddButton[aria-expanded="true"] .mt-ddChevron { transform: rotate(180deg); }
+.mt-ddPanel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
+  min-width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.mt-ddSearchRow { padding: 2px; }
+.mt-ddSearch { width: 100%; height: 26px; padding: 0 8px; box-sizing: border-box;
+  border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary);
+  font-family: inherit; font-size: 12px; line-height: 20px; outline: none; }
+.mt-ddSearch:focus { border-color: var(--dsw-alias-border-l4); }
+.mt-ddEmptyItem { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.mt-ddEmptyItem:hover { background: transparent; }
+.mt-ddPanel .mt-ddMenu { position: static; max-height: 240px; box-shadow: none;
+  border: 0; padding: 0; background: transparent; }
+.mt-ddMenu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
+  min-width: 100%; max-height: 260px; overflow: auto;
+  margin: 0; padding: 4px; list-style: none;
+  border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.mt-ddItem { display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  border-radius: var(--dsw-radius-sm); color: var(--dsw-alias-label-primary);
+  font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap; }
+.mt-ddItem:hover, .mt-ddItem[data-active] { background: var(--dsw-alias-interactive-bg-hover); }
+.mt-ddItem[aria-selected="true"] { color: var(--dsw-alias-brand-primary-new-color); }
+.mt-ddCheck { flex: none; width: 12px; }
+.mt-input { width: 100%; }
+.mt-inputNarrow { width: 88px; flex: none; }
+.mt-effortSelect { width: 96px; min-width: 96px; max-width: 96px; flex: none; }
+.mt-chip { display: inline-flex; align-items: center; flex: none; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; height: 24px; padding: 0 10px;
+  border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm);
+  background: transparent; color: var(--dsw-alias-label-secondary);
+  font-family: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
+.mt-chip:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.mt-dock { margin: 0 auto 8px; width: 100%; max-width: 720px;
+  /* 外壳只负责高度与透明度动画：内层卡片承担边框/背景/内边距。
+     高度用 grid-template-rows 的 1fr → 0fr 收到 0——它由内容决定，
+     不用猜一个 max-height 常量（行数在 1～20 之间浮动，写死会失真）。 */
+  display: grid; grid-template-rows: 1fr;
+  transition: grid-template-rows 220ms ease-in, opacity 220ms ease-in,
+    margin-bottom 220ms ease-in;
+  opacity: 1; }
+/* 关闭：行高收到 0，同时淡出；播完由 JS 卸载（时长见 DOCK_CLOSE_MS） */
+.mt-dockClosing { grid-template-rows: 0fr; opacity: 0; margin-bottom: 0;
+  pointer-events: none; }
+/* 内层：真正的卡片外观，且必须 min-height:0 才能被 grid 行高压下去 */
+.mt-dockInner { display: flex; flex-direction: column; gap: 6px; min-height: 0;
+  overflow: hidden; padding: 10px 12px;
+  border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2); font-size: 12px; line-height: 18px; }
+/* 尊重系统的减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .mt-dock { transition: none; }
+}
+.mt-dockHead { display: flex; align-items: center; gap: 8px; }
+.mt-dockDot { flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary); }
+.mt-dockDotLive { background: var(--dsw-alias-brand-primary); }
+/* 标题行：活动名 → 耗时 → 模式 → 进度 */
+.mt-dockTitle { color: var(--dsw-alias-label-primary); font-size: 12px;
+  flex: none; white-space: nowrap; }
+/* 模式（llm / subagent）是补充说明，退为最次级 */
+.mt-dockMode { color: var(--dsw-alias-label-tertiary); font-size: 11px;
+  flex: none; white-space: nowrap; }
+.mt-dockMode::before { content: '·'; margin-right: 4px; color: var(--dsw-alias-border-l4); }
+/* 进度排最右：次要信息，等宽数字 */
+.mt-dockProgress { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums;
+  flex: none; white-space: nowrap; }
+/* 总耗时：运行中与进度并列，等宽数字避免跳动 */
+.mt-dockElapsed { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums;
+  font-size: 12px; }
+.mt-dockClose { flex: none; width: 20px; height: 20px; display: inline-flex;
+  align-items: center; justify-content: center; border: 0; border-radius: var(--dsw-radius-xs);
+  background: transparent; color: var(--dsw-alias-label-tertiary);
+  font-family: inherit; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
+.mt-dockClose:hover { background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary); }
+/* 执行中锁定：不可点，光标与配色都要说出来 */
+.mt-dockCloseLocked, .mt-dockClose:disabled { cursor: not-allowed;
+  color: var(--dsw-alias-border-l3); background: transparent; }
+.mt-dockCloseLocked:hover, .mt-dockClose:disabled:hover { background: transparent;
+  color: var(--dsw-alias-border-l3); }
+.mt-dockRows { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.mt-dockRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 名称固定宽度（不再 flex:1）：右侧要留给「最新一段输出」，两者抢空间会互相挤没 */
+.mt-dockName { flex: none; width: 128px; min-width: 0; color: var(--dsw-alias-label-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-dockEffort { flex: none; min-width: 44px; font-size: 11px; }
+.mt-dockTime { flex: none; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.mt-dockDetail { flex: none; max-width: 180px; color: var(--dsw-alias-label-tertiary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 阶段徽标：紧贴输出文字，说明「这一段是什么」。左侧留出与进度条的间隔，
+   右侧不留（让它像是输出文字的前缀，而不是独立一列）。 */
+.mt-phase { flex: none; margin-left: 2px; padding: 0 6px; border-radius: var(--dsw-radius-xs);
+  border: .5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-secondary);
+  font-size: 11px; line-height: 16px; white-space: nowrap; }
+.mt-phase-thinking { color: var(--dsw-alias-label-tertiary);
+  border-color: var(--dsw-alias-border-l2); }
+.mt-phase-tool { color: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary); }
+.mt-phase-answering { color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-l4); }
+.mt-phase-done { color: var(--dsw-alias-state-success-primary);
+  border-color: var(--dsw-alias-state-success-primary); }
+.mt-phase-failed { color: var(--dsw-alias-state-error-primary);
+  border-color: var(--dsw-alias-state-error-primary); }
+/* 单家停止：只在运行中出现，尺寸比关闭按钮小一档 */
+.mt-dockStop { flex: none; border: .5px solid var(--dsw-alias-border-l3); background: transparent;
+  color: var(--dsw-alias-label-tertiary); font-family: inherit; font-size: 11px; line-height: 16px;
+  padding: 0 6px; border-radius: var(--dsw-radius-xs); cursor: pointer; }
+.mt-dockStop:hover:not(:disabled) { border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary); }
+.mt-dockStop:disabled { cursor: default; opacity: .5; }
+/* 已停止：不再是失败红，用中性灰，表示「是我们自己停的」 */
+.mt-phase-stopped { color: var(--dsw-alias-label-tertiary); border-color: var(--dsw-alias-border-l3); }
+/* 最新一段输出：跟在状态后方，占剩余空间，超长省略 */
+.mt-dockTail { flex: 1 1 0; min-width: 0; color: var(--dsw-alias-label-tertiary);
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--ds-font-family-code, ui-monospace, monospace); }
+/* 行首状态图标：等待 / 运行 / 完成 / 失败。
+   为什么不用进度条：分母是执行组数，组内回落会让实际调用次数随时变化，
+   永远算不出真实百分比——画一条固定半格/满格的条只会误导。 */
+.mt-rowIcon { flex: none; width: 12px; height: 12px; display: inline-flex;
+  align-items: center; justify-content: center; border-radius: 50%;
+  border: 1.5px solid var(--dsw-alias-border-l3); box-sizing: border-box; }
+/* 等待：虚线空心圈，静止 */
+.mt-rowIconQueued { border-style: dashed; border-color: var(--dsw-alias-border-l4); }
+/* 运行：实心弧 + 旋转。用 2px 的品牌色弧段，与静止的虚线圈一眼可分 */
+.mt-rowIconLive { border-width: 1.5px; border-color: var(--dsw-alias-border-l2);
+  border-top-color: var(--dsw-alias-brand-primary);
+  border-right-color: var(--dsw-alias-brand-primary);
+  animation: mt-row-spin .9s linear infinite; }
+/* 完成：实心 + 对勾 */
+.mt-rowIconDone { border-color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-state-success-primary); }
+.mt-rowIconDone::after { content: ''; width: 6px; height: 3px;
+  border-left: 1.5px solid var(--dsw-alias-bg-base);
+  border-bottom: 1.5px solid var(--dsw-alias-bg-base);
+  transform: rotate(-45deg) translate(0.5px, -0.5px); }
+/* 失败：实心 + 叉 */
+.mt-rowIconBad { border-color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-state-error-primary); position: relative; }
+.mt-rowIconBad::before, .mt-rowIconBad::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 1.5px;
+  background: var(--dsw-alias-bg-base); border-radius: 1px; }
+.mt-rowIconBad::before { transform: translate(-50%, -50%) rotate(45deg); }
+.mt-rowIconBad::after { transform: translate(-50%, -50%) rotate(-45deg); }
+@keyframes mt-row-spin { to { transform: rotate(360deg) } }
+.mt-dockWaiting { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.mt-bad { color: var(--dsw-alias-state-error-primary); }
+
+.mt-chipOn { border-color: transparent; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+/* 已绑定的对号：绿色，并与名字留一点间距 */
+.mt-chipCheck { color: var(--dsw-alias-state-success-primary); margin-right: 4px;
+  font-variant-numeric: tabular-nums; }
+/* 整行「新建」按钮：虚线描边、占满宽度 */
+.mt-addRow { display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; height: 36px; margin-top: 8px; padding: 0 12px;
+  border: 1px dashed var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-md);
+  background: transparent; color: var(--dsw-alias-label-secondary);
+  font-family: inherit; font-size: 13px; line-height: 20px; cursor: pointer;
+  transition: background var(--ds-transition-duration) var(--ds-ease-in-out),
+              border-color var(--ds-transition-duration) var(--ds-ease-in-out),
+              color var(--ds-transition-duration) var(--ds-ease-in-out); }
+.mt-addRow:hover:not(:disabled) { border-color: var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.mt-addRow:disabled { opacity: .5; cursor: default; }
+.mt-addRowInner { height: 30px; margin-top: 2px; font-size: 12px; }
+
+/* 厂商路由串：等宽显示、过长省略 */
+.mt-candRemove { flex: none; height: 24px; padding: 0 8px; font-size: 12px;
+  color: var(--dsw-alias-state-error-primary); }
+.mt-candRemove:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+.mt-candRoute { flex: 1; min-width: 0; font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 未展开条目里的标题行只做透传，不改变原有横向排布 */
+.mt-itemHeadPlain { display: contents; }
+.mt-ok { color: var(--dsw-alias-state-primary, var(--dsw-alias-state-success-primary)); }
+
+/* 芯片组：横向排列、自动换行、彼此留白，绝不逐字折行 */
+.mt-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+/* 活动绑定的单行：标题/说明左，计数右，芯片组单独占下一行 */
+.mt-bindRow { display: flex; flex-direction: column; gap: 6px; padding: 12px 0;
+  border-top: .5px solid var(--dsw-alias-border-l1); }
+.mt-bindRow:first-of-type { border-top: 0; }
+.mt-bindHead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.mt-bindTitle { font-size: 13px; line-height: 20px; }
+.mt-bindHint { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+
+/* 执行组：官方「组」形态（标题 + 说明 + 条目），不用卡片堆叠 */
+.mt-groupHead { display: flex; align-items: center; gap: 8px; }
+.mt-groupHead .mt-rowTitle { flex: 1; }
+
+.mt-groups { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+/* 列表里的条目统一左右 12px 内边距；展开/收起不改变内容宽度 */
+.mt-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border-top: .5px solid var(--dsw-alias-border-l1); }
+.mt-itemMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mt-itemTitle { font-size: 13px; line-height: 20px; }
+.mt-itemDesc { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px;
+  overflow-wrap: anywhere; }
+.mt-itemActions { flex: none; display: flex; align-items: center; gap: 4px; }
+
+.mt-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 7px;
+  border-radius: var(--dsw-radius-xs); background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 18px; }
+.mt-tagOk { color: var(--dsw-alias-state-success-primary); }
+
+/* 候选行：序号 + 下拉 + 强度 + 操作 */
+.mt-cand { display: flex; align-items: center; gap: 8px; }
+/* 偏好行：左说明、右控件（官方设置页的形态） */
+.mt-prefRow { display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; padding: 10px 0; border-top: .5px solid var(--dsw-alias-border-l1); }
+.mt-prefRow:first-of-type { border-top: 0; }
+.mt-prefMain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mt-prefTitle { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.mt-prefHint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.mt-prefControl { flex: none; display: flex; align-items: center; gap: 8px; }
+
+/* 开关：关 = 中性轨道；开 = 品牌色轨道 + 同色描边 + 轻微外发光。
+   三重强化是刻意的：单靠 --dsw-alias-brand-primary 在部分主题下与轨道对比不足，
+   打开与关闭看起来差不多（真机反馈「打开后看不出颜色」）。 */
+.mt-switch { position: relative; flex: none; width: 32px; height: 18px; padding: 0;
+  border: 0; border-radius: 9px; background: var(--dsw-alias-border-l3);
+  cursor: pointer; transition: background .16s ease, box-shadow .16s ease; }
+.mt-switch:hover:not(:disabled) { background: var(--dsw-alias-border-l4); }
+.mt-switchOn,
+.mt-switchOn:hover:not(:disabled) {
+  /* 品牌色缺失时依次回退到「交互蓝 → 成功绿」，绝不退回灰色轨道。 */
+  background: var(--dsw-alias-brand-primary,
+    var(--dsw-alias-state-primary, var(--dsw-alias-state-success-primary)));
+  box-shadow: 0 0 0 1px var(--dsw-alias-brand-primary, var(--dsw-alias-state-primary)),
+    0 0 6px -1px var(--dsw-alias-brand-primary, var(--dsw-alias-state-primary));
+}
+.mt-switch:disabled { cursor: default; opacity: .5; }
+.mt-switchThumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--dsw-alias-switch-thumb);
+  box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .16s ease; }
+.mt-switchOn .mt-switchThumb { transform: translateX(14px);
+  box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.mt-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+/* 开关行：与其它控件同字号 13/20 */
+.mt-switchRow { display: inline-flex; align-items: center; gap: 10px; }
+.mt-switchLabel { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.mt-cand .mt-select { max-width: 380px; }
+.mt-candIndex { flex: none; width: 44px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; }
+/* 厂商 tag：描边样式，等宽字体，过长省略 */
+.mt-vendors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.mt-vendorTag { display: inline-flex; align-items: center; max-width: 100%;
+  height: 20px; padding: 0 8px; border: .5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm); background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 11px; line-height: 20px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.mt-candActions { display: flex; gap: 2px; }
+/* 拖拽：把手 + 落点提示 */
+.mt-dragHandle { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center;
+  justify-content: center; border: 0; background: transparent; color: var(--dsw-alias-label-tertiary);
+  cursor: grab; border-radius: var(--dsw-radius-xs); font-size: 12px; line-height: 1; }
+.mt-dragHandle:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.mt-cand[data-dragging] { opacity: .45; }
+.mt-cand[data-dropBefore] { box-shadow: inset 0 2px 0 0 var(--dsw-alias-brand-primary-new-color); }
+.mt-cand[data-dropAfter] { box-shadow: inset 0 -2px 0 0 var(--dsw-alias-brand-primary-new-color); }
+
+.mt-editor { display: flex; flex-direction: column; gap: 12px; padding: 12px 0 4px; }
+.mt-itemOpen { display: block;
+  /* 展开态：底色用半透明中性叠加（layer token 在本主题下不提供深色层次），
+     左侧用 brand-primary 竖线；两者都不依赖 color-mix。 */
+  background: rgba(127, 127, 127, 0.12);
+  border-left: 2px solid var(--dsw-alias-brand-primary);
+  border-radius: var(--dsw-radius-md); padding-left: 10px; }
+/* 展开时把「标题行」恢复成横向，编辑器独占下一行 */
+.mt-itemOpen > .mt-itemHead { display: flex; align-items: center; gap: 12px; }
+.mt-itemEditor { display: flex; flex-direction: column; gap: 4px;
+  border-top: .5px solid var(--dsw-alias-border-l1); margin-top: 2px; }
+.mt-field { display: flex; flex-direction: column; gap: 6px; }
+.mt-fieldLabel { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.mt-actions { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+/* 区块底部的操作行：右对齐，与上方内容留一点距离 */
+.mt-actionsEnd { justify-content: flex-end; padding-top: 12px; margin-top: 4px;
+  border-top: .5px solid var(--dsw-alias-border-l1); }
+
+.mt-empty { color: var(--dsw-alias-label-tertiary); margin: 0; font-size: 13px; line-height: 20px; padding: 12px 0; }
+.mt-error { color: var(--dsw-alias-state-error-primary); margin: 0; font-size: 13px; line-height: 20px; }
+.mt-dim { color: var(--dsw-alias-label-tertiary); }
+.mt-pre { margin: 0; padding: 12px 0 0; font-family: var(--ds-font-family-code, monospace);
+  font-size: 13px; line-height: 20px; white-space: pre-wrap; word-break: break-word; }
+
+.mt-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px; }
+.mt-table th { text-align: left; font-weight: 400; color: var(--dsw-alias-label-tertiary);
+  padding: 6px 16px 6px 0; white-space: nowrap; }
+.mt-table td { padding: 8px 16px 8px 0; vertical-align: middle; }
+.mt-table tr + tr td { border-top: .5px solid var(--dsw-alias-border-l1); }
+.mt-mono { font-variant-numeric: tabular-nums; }
+
+</style>
+</head>
+<body>
+<div class="preview-shell">
+  <p class="preview-note">
+    静态预览：只用 <code>--dsw-alias-*</code> / <code>--dsw-radius-*</code> token，样式与
+    <code>client.js</code> 的 <code>css</code> 常量同源。设计稿，不连 Host。
+  </p>
+
+  <p class="preview-cap">对话内进度窗 · 执行中：阶段徽标 + 最新一段输出（不可关闭）</p>
+  <div class="mt-dock">
+    <div class="mt-dockInner">
+    <div class="mt-dockHead">
+      <span class="mt-dockDot mt-dockDotLive"></span>
+      <span class="mt-dockTitle">专责推理</span>
+      <span class="mt-dockElapsed">37s</span>
+      <span class="mt-dockMode">llm</span>
+      <div style="flex:1"></div>
+      <span class="mt-dockProgress">1/5 已结束</span>
+      <button class="mt-dockClose mt-dockCloseLocked" disabled aria-disabled="true"
+        title="执行中不可关闭">·</button>
+    </div>
+    <ul class="mt-dockRows">
+      <li class="mt-dockRow">
+        <span class="mt-rowIcon mt-rowIconQueued" aria-hidden="true"></span>
+        <span class="mt-dockName">Kimi K3</span>
+        <span class="mt-dockEffort mt-dim">high</span>
+        <span class="mt-dim">运行</span>
+        <span class="mt-dockTime mt-dim">—</span>
+        <span class="mt-phase mt-phase-queued">排队</span>
+        <span class="mt-dockTail">等待回落</span>
+      </li>
+      <li class="mt-dockRow">
+        <span class="mt-rowIcon mt-rowIconLive" aria-hidden="true"></span>
+        <span class="mt-dockName">DeepSeek V4.1</span>
+        <span class="mt-dockEffort mt-dim">high</span>
+        <span class="mt-dim">运行</span>
+        <span class="mt-dockTime mt-dim">—</span>
+        <span class="mt-phase mt-phase-thinking">思考</span>
+        <span class="mt-dockTail">先比较三种策略的成本与可读性</span>
+      </li>
+      <li class="mt-dockRow">
+        <span class="mt-rowIcon mt-rowIconLive" aria-hidden="true"></span>
+        <span class="mt-dockName">GLM-5.3</span>
+        <span class="mt-dockEffort mt-dim">high</span>
+        <span class="mt-dim">运行</span>
+        <span class="mt-dockTime mt-dim">—</span>
+        <span class="mt-phase mt-phase-answering">回答</span>
+        <span class="mt-dockTail">结论：建议采用固定基线加阶段动态升降级…</span>
+        <button class="mt-dockStop">停止</button>
+      </li>
+      <li class="mt-dockRow">
+        <span class="mt-rowIcon mt-rowIconDone" aria-hidden="true"></span>
+        <span class="mt-dockName">Grok 4.7</span>
+        <span class="mt-dockEffort mt-dim">默认</span>
+        <span class="mt-ok">完成</span>
+        <span class="mt-dockTime mt-dim">3s</span>
+        <span class="mt-phase mt-phase-done">完成</span>
+        <span class="mt-dockTail">工具调用完成，结论见正文</span>
+      </li>
+      <li class="mt-dockRow">
+        <span class="mt-rowIcon mt-rowIconBad" aria-hidden="true"></span>
+        <span class="mt-dockName">Gemini 4</span>
+        <span class="mt-dockEffort mt-dim">high</span>
+        <span class="mt-bad">失败</span>
+        <span class="mt-dockTime mt-dim">2s</span>
+        <span class="mt-phase mt-phase-failed">失败</span>
+        <span class="mt-dockTail">额度用尽</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="mt-root">
+    <header>
+      <h1 class="mt-pageTitle">多模型团队</h1>
+      <p class="mt-intro">并发调用各模型做审计、分叉与推理。</p>
+    </header>
+
+    <section class="mt-row">
+      <div class="mt-groupHead">
+        <h2 class="mt-rowTitle">执行组</h2>
+        <span class="mt-dim">一个组 = 同一模型的多个厂商路由，按顺序回落</span>
+      </div>
+      <ul class="mt-list">
+      
+        <li class="mt-item">
+          <div class="mt-itemHeadPlain">
+            <div class="mt-itemMain">
+              <div class="mt-itemTitle">
+                <span class="mt-itemTitle">Kimi K3 · routing group</span>
+                <span class="mt-tag">强度 high</span>
+                <span class="mt-tag mt-tagOk">启用</span>
+                <span class="mt-dim">2 个厂商</span>
+              </div>
+              <div class="mt-vendors">
+                <span class="mt-vendorTag" title="magpie/group/auto-kimi-k3">magpie/group/auto-kimi-k3</span><span class="mt-vendorTag" title="magpie/devin/kimi-k3">magpie/devin/kimi-k3</span>
+              </div>
+            </div>
+            <div class="mt-itemActions">
+              <button class="mt-button mt-buttonGhost">编辑</button>
+              <button class="mt-button mt-buttonGhost">删除</button>
+            </div>
+          </div>
+        </li>
+        <li class="mt-item">
+          <div class="mt-itemHeadPlain">
+            <div class="mt-itemMain">
+              <div class="mt-itemTitle">
+                <span class="mt-itemTitle">GLM-5.3</span>
+                <span class="mt-tag">强度 high</span>
+                <span class="mt-tag mt-tagOk">启用</span>
+                <span class="mt-dim">1 个厂商</span>
+              </div>
+              <div class="mt-vendors">
+                <span class="mt-vendorTag" title="magpie/group/auto-glm-5-3">magpie/group/auto-glm-5-3</span>
+              </div>
+            </div>
+            <div class="mt-itemActions">
+              <button class="mt-button mt-buttonGhost">编辑</button>
+              <button class="mt-button mt-buttonGhost">删除</button>
+            </div>
+          </div>
+        </li>
+        <li class="mt-item">
+          <div class="mt-itemHeadPlain">
+            <div class="mt-itemMain">
+              <div class="mt-itemTitle">
+                <span class="mt-itemTitle">DeepSeek V4.1 Flash</span>
+                <span class="mt-tag">强度 high</span>
+                <span class="mt-tag mt-tagOk">启用</span>
+                <span class="mt-dim">1 个厂商</span>
+              </div>
+              <div class="mt-vendors">
+                <span class="mt-vendorTag" title="magpie/group/auto-deepseek-v4-1-flash">magpie/group/auto-deepseek-v4-1-flash</span>
+              </div>
+            </div>
+            <div class="mt-itemActions">
+              <button class="mt-button mt-buttonGhost">编辑</button>
+              <button class="mt-button mt-buttonGhost">删除</button>
+            </div>
+          </div>
+        </li>
+        <li class="mt-item">
+          <div class="mt-itemHeadPlain">
+            <div class="mt-itemMain">
+              <div class="mt-itemTitle">
+                <span class="mt-itemTitle">Grok 4.7</span>
+                
+                <span class="mt-tag mt-tagOk">启用</span>
+                <span class="mt-dim">1 个厂商</span>
+              </div>
+              <div class="mt-vendors">
+                <span class="mt-vendorTag" title="magpie-responses/grok/grok-4.7@500k">magpie-responses/grok/grok-4.7@500k</span>
+              </div>
+            </div>
+            <div class="mt-itemActions">
+              <button class="mt-button mt-buttonGhost">编辑</button>
+              <button class="mt-button mt-buttonGhost">删除</button>
+            </div>
+          </div>
+        </li>
+        <li class="mt-item">
+          <div class="mt-itemHeadPlain">
+            <div class="mt-itemMain">
+              <div class="mt-itemTitle">
+                <span class="mt-itemTitle">Claude Opus 5.5</span>
+                
+                <span class="mt-tag">停用</span>
+                <span class="mt-dim">1 个厂商</span>
+              </div>
+              <div class="mt-vendors">
+                <span class="mt-vendorTag" title="magpie/devin/claude-opus-5-5">magpie/devin/claude-opus-5-5</span>
+              </div>
+            </div>
+            <div class="mt-itemActions">
+              <button class="mt-button mt-buttonGhost">编辑</button>
+              <button class="mt-button mt-buttonGhost">删除</button>
+            </div>
+          </div>
+        </li>
+      </ul>
+      <button class="mt-addRow">＋ 新建执行组</button>
+    </section>
+
+    <section class="mt-row">
+      <h2 class="mt-rowTitle">活动绑定</h2>
+      <p class="mt-rowHint">每类活动各自绑定参与的执行组；不绑定时退回全部启用的组。</p>
+      
+        <div class="mt-bindRow">
+          <div class="mt-bindHead">
+            <span>事后审计</span>
+            <span class="mt-dim">找本切片缺陷，重要性 1～5</span>
+          </div>
+          <div class="mt-chips">
+            <span class="mt-vendorTag">Kimi K3 · routing group</span>
+            <span class="mt-vendorTag">GLM-5.3</span>
+            <span class="mt-vendorTag">DeepSeek V4.1 Flash</span>
+            <span class="mt-vendorTag">Grok 4.7</span>
+          </div>
+        </div>
+      
+        <div class="mt-bindRow">
+          <div class="mt-bindHead">
+            <span>设计分叉</span>
+            <span class="mt-dim">2～4 个方向，禁止拍板</span>
+          </div>
+          <div class="mt-chips">
+            <span class="mt-vendorTag">Kimi K3 · routing group</span>
+            <span class="mt-vendorTag">GLM-5.3</span>
+            <span class="mt-vendorTag">DeepSeek V4.1 Flash</span>
+            <span class="mt-vendorTag">Grok 4.7</span>
+          </div>
+        </div>
+      
+        <div class="mt-bindRow">
+          <div class="mt-bindHead">
+            <span>专责推理</span>
+            <span class="mt-dim">结论、步骤、风险、非目标</span>
+          </div>
+          <div class="mt-chips">
+            <span class="mt-vendorTag">Kimi K3 · routing group</span>
+            <span class="mt-vendorTag">GLM-5.3</span>
+            <span class="mt-vendorTag">DeepSeek V4.1 Flash</span>
+            <span class="mt-vendorTag">Grok 4.7</span>
+          </div>
+        </div>
+    </section>
+
+    <section class="mt-row">
+      <div class="mt-groupHead"><h2 class="mt-rowTitle">周报与报告</h2></div>
+
+      <div class="mt-rowSplit">
+        <div class="mt-rowMain">
+          <span>保存数据（周报与报告总开关）</span>
+          <span class="mt-rowHint">关闭中：执行结果只在本次对话里返回，不落任何文件，周报与报告不可用。</span>
+        </div>
+        <div class="mt-rowControl">
+          <button class="mt-switch" role="switch" aria-checked="false" aria-label="保存数据"><span class="mt-switchThumb"></span></button>
+        </div>
+      </div>
+      <p class="mt-rowHint" style="opacity:.6">↑ 关着时下面三项与「执行报告」整块都不显示（此预览把两种状态并排画出来）</p>
+
+      <div style="border-top:.5px solid var(--dsw-alias-border-l1); padding-top:12px; margin-top:8px">
+        <p class="mt-rowHint" style="margin-bottom:8px">开关打开后出现：</p>
+        <div class="mt-rowSplit">
+          <div class="mt-rowMain">
+            <span>周报总结模型</span>
+            <span class="mt-rowHint">一键生成周报时，用这个模型做 LLM 总结。</span>
+          </div>
+          <div class="mt-rowControl"><span class="mt-vendorTag">deepseek-official/deepseek-flash</span></div>
+        </div>
+        <div class="mt-rowSplit">
+          <div class="mt-rowMain">
+            <span>报告目录</span>
+            <span class="mt-rowHint">报告写在 &lt;目录&gt;/reports/ 下。留空用默认 ~/.model-team。</span>
+          </div>
+          <div class="mt-rowControl"><span class="mt-vendorTag mt-dim">留空 = ~/.model-team</span></div>
+        </div>
+        <div class="mt-rowSplit">
+          <div class="mt-rowMain">
+            <span>生成报告后自动上传</span>
+            <span class="mt-rowHint">需同时满足：本开关打开 + 目录在 git 仓库里 + 仓库配了远端。</span>
+          </div>
+          <div class="mt-rowControl"><button class="mt-switch" role="switch" aria-checked="true" aria-label="自动上传"><span class="mt-switchThumb"></span></button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-row">
+      <div class="mt-groupHead">
+        <h2 class="mt-rowTitle">执行报告</h2>
+        <span class="mt-dim" style="font-size:11px">（仅「保存数据」打开时显示）</span>
+        <div style="flex:1"></div>
+        <span class="mt-vendorTag">近 7 天</span>
+      </div>
+      <p class="mt-rowHint">生成一份自包含的 HTML 报告（场次、模型表现、周报），用浏览器打开查阅。</p>
+      <div class="mt-actions mt-actionsEnd">
+        <button class="mt-button">生成并打开</button>
+        <button class="mt-button mt-buttonGhost">打开最新</button>
+      </div>
+    </section>
+  
+</div>
+</body>
+</html>

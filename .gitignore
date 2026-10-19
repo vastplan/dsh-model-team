@@ -1,0 +1,17 @@
+# 依赖与构建产物
+node_modules/
+.pnpm-store/
+
+# 本机与编辑器
+.DS_Store
+*.log
+
+# 运行时数据（账本、场次日志只在本机 $DSH_HOME 下）
+*.db
+*.db-shm
+*.db-wal
+runs/
+
+# 环境变量
+.env
+.env.*
