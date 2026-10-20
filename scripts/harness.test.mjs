@@ -15,6 +15,7 @@ import {
 } from '../src/harness/protocol.js';
 import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
 import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
+import { logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
@@ -146,14 +147,14 @@ test('runHarness：非零退出带上 stderr', async () => {
   );
 });
 
-test('cliCatalogEntries 生成合成 provider 与 harness 字段', () => {
+test('cliCatalogEntries 生成合成 provider 与 harness 字段', async () => {
   freshRegistry();
-  const entries = cliCatalogEntries({
+  const entries = await cliCatalogEntries({
     cliModels: [
       { id: 'k3', tool: 'pi', provider: 'magpie', model: 'group/auto-kimi-k3', modelKey: 'kimi-k3' },
       { id: 'missing', tool: 'nope', model: 'x' },
     ],
-  }, undefined, { available: () => true });
+  }, undefined, { available: () => true, discover: false });
   assert.equal(entries.length, 1);
   assert.equal(entries[0].provider, 'cli-pi');
   assert.equal(entries[0].harnessModel, 'group/auto-kimi-k3');
@@ -179,6 +180,7 @@ test('runTeam 端到端：CLI 条目走协议、进结果行', async () => {
     toolName: 'model_team',
     models: [],
     cliModels: [{ id: 'test', tool: 'fake', model: 'fake/model' }],
+    discoverCli: false,
   };
   const configStore = {
     table: (name) => ({
@@ -216,7 +218,7 @@ test('runTeam 端到端：CLI 条目走协议、进结果行', async () => {
 test('runTeam：DSH 路径不受 CLI 重构影响', async () => {
   freshRegistry();
   const { runTeam } = await import('../index.js');
-  const config = { toolName: 'model_team', models: ['p/m'], cliModels: [] };
+  const config = { toolName: 'model_team', models: ['p/m'], cliModels: [], discoverCli: false };
   const configStore = {
     table: (name) => ({
       get: () => (name === 'prefs' ? { persistData: false } : undefined),
@@ -350,9 +352,63 @@ test('harnessAvailable：缺 CLI 判为不可用，node 判为可用', () => {
   assert.equal(harnessAvailable(node), true);
 });
 
-test('cliCatalogEntries：不可用的 CLI 不进入厂商目录', () => {
+test('cliCatalogEntries：不可用的 CLI 不进入厂商目录', async () => {
   freshRegistry();
   const config = { cliModels: [{ id: 'k3', tool: 'pi', model: 'auto/kimi-k3' }] };
-  assert.equal(cliCatalogEntries(config, null, { available: () => false }).length, 0);
-  assert.equal(cliCatalogEntries(config, null, { available: () => true }).length, 1);
+  assert.equal((await cliCatalogEntries(config, null, { available: () => false, discover: false })).length, 0);
+  assert.equal((await cliCatalogEntries(config, null, { available: () => true, discover: false })).length, 1);
+});
+
+test('逻辑模型键与路由去重', () => {
+  assert.equal(logicalKeyOf('magpie/auto/GLM-5.3'), 'glm-5-3');
+  assert.equal(logicalKeyOf('group/auto-kimi-k3'), 'kimi-k3');
+  assert.equal(logicalKeyOf('grok/grok-4.7@500k'), 'grok-4-7@500k');
+  const models = normalizeModels([
+    { id: 'devin/glm-5-3', name: 'GLM Devin' },
+    { id: 'auto/GLM-5.3', name: 'GLM Auto' },
+    { id: 'zcode/GLM-5.3', name: 'GLM ZCode' },
+  ]);
+  assert.equal(models.length, 1);
+  assert.equal(models[0].harnessModel, 'auto/GLM-5.3');
+});
+
+test('discover 解析器', () => {
+  assert.deepEqual(
+    parseDiscovery('id-dash-name', 'auto - Auto (default)\nclaude-opus-5-5-high - Claude Opus 5.5 High').map((item) => item.id),
+    ['auto', 'claude-opus-5-5-high'],
+  );
+  assert.deepEqual(
+    parseDiscovery('bullet', '  - grok-4.7\n  - grok-4.6').map((item) => item.id),
+    ['grok-4.7', 'grok-4.6'],
+  );
+  assert.deepEqual(
+    parseDiscovery('devin-table', '  swe-2-high   SWE-2 High  [262K context, Free]\n  aliases: swe\n').map((item) => item.id),
+    ['swe-2-high'],
+  );
+  assert.deepEqual(
+    parseDiscovery('qoder-table', 'MODEL\nAuto\nQwen3.8-Max').map((item) => item.id),
+    ['Auto', 'Qwen3.8-Max'],
+  );
+});
+
+test('cliCatalogEntries：自动发现条目 + 显式覆盖', async () => {
+  freshRegistry();
+  const auto = await cliCatalogEntries({ cliModels: [] }, undefined, {
+    available: () => true,
+    discover: false,
+    discovered: [{ harness: 'pi', id: 'glm-5-3', name: 'GLM-5.3', provider: 'magpie', modelKey: 'glm-5-3', harnessModel: 'auto/GLM-5.3' }],
+  });
+  assert.equal(auto.length, 1);
+  assert.equal(auto[0].provider, 'cli-pi');
+  assert.equal(auto[0].harnessModel, 'auto/GLM-5.3');
+
+  const overridden = await cliCatalogEntries({
+    cliModels: [{ id: 'k3', tool: 'pi', model: 'auto/kimi-k3', modelKey: 'kimi-k3' }],
+  }, undefined, {
+    available: () => true,
+    discover: false,
+    discovered: [{ harness: 'pi', id: 'kimi-k3', name: 'Kimi K3', provider: 'magpie', modelKey: 'kimi-k3', harnessModel: 'auto/kimi-k3' }],
+  });
+  assert.equal(overridden.length, 1);
+  assert.equal(overridden[0].id, 'k3');
 });

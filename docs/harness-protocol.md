@@ -38,6 +38,7 @@
 | `prompt` | 否 | `{ via: "argv" }` | `{ via: argv\|stdin\|file\|none, separator, template }`；`none` = 提示词已在 args 的 `{prompt}` 里 |
 | `env` | 否 | `{ inherit: true }` | `{ inherit, set, unset }` |
 | `output` | 否 | `{ parser: "auto" }` | `{ parser, args }`；parser = `auto\|jsonl\|text\|pi\|opencode` |
+| `discover` | 否 | `null` | `{ command?, argv, parser }`；自动发现模型列表（parser 见「自动发现」） |
 | `usage` | 否 | `{ source: "stream", aggregate: "auto" }` | 用量口径；`aggregate` 传给解析器 |
 | `capabilities` | 否 | 只读 | `{ readOnlyByDefault, streamsUsage, backgroundAgents }` |
 | `probe` | 否 | `null` | `{ args, classify }`，就绪探测（设置页用，P2） |
@@ -45,6 +46,7 @@
 | `timeoutMs` / `silenceMs` | 否 | `0` | 机制层自己的总超时/无输出看门狗（0=不启用） |
 | `cwd` | 否 | `workspace` | `workspace` 或绝对路径 |
 | `hooks.plan` | 否 | `null` | 代码型钩子（仅内置/JS）：`(entry, prompt, context) => { argv, env?, cwd?, stdin?, prepare? }`；用于 zcode 这类要改临时配置的 CLI |
+| `hooks.discover` | 否 | `null` | 代码型钩子：`() => ({ id, name, provider? })[]`；读本机配置（pi/zcode/cline） |
 
 未列出的字段会被忽略；协议版本固定为 1（`PROTOCOL_VERSION`）。
 
@@ -103,6 +105,19 @@ command
 - **cline**：默认 `-p`（plan）只读；要 act 档需要另写一个定义（或覆盖 `args`）。
 - **grok**：`prompt.via: none`，所以 `{prompt}` 必须出现在 `args` 里。
 
+### 自动发现来源
+
+| CLI | 来源 |
+| --- | --- |
+| pi | `~/.pi/agent/models.json` 的 `providers[].models[]` |
+| zcode | `~/.zcode/cli/config.json` 的 `builtin:bigmodel-coding-plan` |
+| cline | `~/.cline/data/settings/providers.json` 的当前模型（CLI 无完整列表命令） |
+| opencode | `opencode models` |
+| agent | `agent --list-models` |
+| grok | `grok models` |
+| devin | `devin models list` |
+| qoder | `qoderclicn --list-models` |
+
 ## 3. 在配置里接新 CLI
 
 `cordis.patch.yml` 的 `config` 下加 `harnesses`（定义）与 `cliModels`（模型）：
@@ -131,8 +146,8 @@ command
 ```
 
 - 8 家的示例条目见 [`docs/cli-models.example.json`](cli-models.example.json)，按本机实际模型/路由改。
-- **`cliModels` 是唯一来源**：插件不会自动读取各 CLI 自己的模型配置；在 pi 里加了模型，
-  也要在 `cliModels` 里加一条（`tool: pi` + `model: auto/GLM-5.3`）才会出现在目录里。
+- **自动发现默认开**：`listCatalog()` 会调用各 CLI 的 `discover`/`hooks.discover`；`cliModels` 用于
+  覆盖/补充（同 `tool + modelKey` 显式优先）。关掉用 `discoverCli: false`。
 - `tool` 必须是已登记的 harness id（内置或 `harnesses` 里定义的）。
 - 合成 provider 是 `cli-<tool>`；上面两条分别得到 `cli-pi/k3`、`cli-foo/...`。
 - `modelKey` 决定页面把哪些路由聚成一个执行组。要和 DSH 的 `kimi-k3` 合组，
@@ -180,7 +195,24 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 
 ---
 
-## 5. 可用性过滤
+## 5. 自动发现
+
+`listCatalog()` 在目录构建时对**可用**的 CLI 跑发现：
+
+- 定义里的 `discover`（命令 + parser）或 `hooks.discover()`（读配置）；
+- 解析器：`lines` / `opencode` / `id-dash-name` / `bullet` / `devin-table` / `qoder-table`；
+- 按**逻辑模型**去重：取最后一段路由、去掉 `auto-`、归一 `[-_.]`；同一逻辑模型的多个路由
+  只留优先级最高的一条（原生 id → `auto/` → `devin/` → `workbuddy/` → `opencode-go/` →
+  `zcode/` → `grok/`）；
+- 结果缓存 30 分钟；装好 CLI/新增模型后最多等 30 分钟或重载插件；
+- `cliModels` 优先：同 `tool + modelKey` 的显式条目覆盖自动条目；
+- `discoverCli: false` 完全关闭自动发现。
+
+**注意**：agent/devin/grok 的模型 id 里带 effort/fast 变体（如 `swe-2-max`、`claude-opus-5-5-high`），
+自动发现会按逻辑 id 去重，但**不会把 effort 变体合并**（它们是不同的 id，本机全量约 1,300 条）。
+嫌多可以 `discoverCli: false` 只用手写条目，或用 `cliModels` 精确补充。
+
+## 6. 可用性过滤
 
 `listCatalog()` 构建目录时会检查每家 CLI 的 `availability`：
 
@@ -192,7 +224,7 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 结果缓存 30s，装好 CLI 后最多等 30s 或重载插件。
 **只判断装没装/配没配，不判断登录态**——未登录仍会列出，调用时由 stderr 暴露。
 
-## 6. 安全与只读
+## 7. 安全与只读
 
 - **显式 opt-in**：只有配置了 `cliModels` 才会调用 CLI；不会自动发现本机 CLI。
 - **只走 argv**：`spawn(argv, {shell:false})`，不拼 shell 字符串。
@@ -207,7 +239,7 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 
 ---
 
-## 7. 测试
+## 8. 测试
 
 ```bash
 node --test scripts/harness.test.mjs

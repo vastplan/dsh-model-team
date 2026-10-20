@@ -165,8 +165,12 @@ async function listCatalog(ctx, config = {}) {
       });
     }
   }
-  // CLI harness 模型：合成 provider（cli-pi / cli-opencode），条目自带 transport/harness。
-  catalog.push(...cliCatalogEntries(config, ctx.logger));
+  // CLI harness 模型：显式 cliModels + 各 CLI 自动发现的模型（可用性过滤在 catalog 内）。
+  const cliEntries = await cliCatalogEntries(config, ctx.logger, {
+    ctx,
+    discover: config.discoverCli !== false,
+  });
+  catalog.push(...cliEntries);
   return catalog;
 }
 
@@ -1287,6 +1291,13 @@ export const Config = z.object({
     efforts: z.array(z.string()).default([]),
     defaultEffort: z.string().default(''),
   })).default([]),
+
+  /**
+   * 是否自动发现各 CLI 支持的模型（默认开）。
+   *
+   * 关掉后只使用 `cliModels` 里显式声明的条目；适合模型太多、只想手选几家的场景。
+   */
+  discoverCli: z.boolean().default(true),
 });
 
 /** Host 服务：Client 通过 `ctx.remote.modelTeam` 读账本与周报（A1）。 */

@@ -24,6 +24,7 @@ export const AGENT_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'take-last' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  discover: { argv: ['--list-models'], parser: 'id-dash-name' },
   availability: { fallbacks: ['~/.local/bin/agent'] },
   probe: { args: ['status'], classify: 'exit0' },
 };
@@ -49,6 +50,27 @@ export const PI_HARNESS = {
   availability: { fallbacks: ['~/.local/bin/pi'] },
   probe: { args: ['--version'], classify: 'exit0' },
   env: { unset: ['FORCE_COLOR'] },
+  hooks: {
+    discover() {
+      const candidates = [
+        join(homedir(), '.pi', 'agent', 'models.json'),
+        join(homedir(), '.pi', 'agent', 'models-store.json'),
+      ];
+      const file = candidates.find((path) => existsSync(path));
+      if (!file) return [];
+      const data = JSON.parse(readFileSync(file, 'utf8'));
+      const providers = data.providers && typeof data.providers === 'object' ? data.providers : data;
+      const out = [];
+      for (const [providerId, provider] of Object.entries(providers)) {
+        if (!provider || typeof provider !== 'object' || !Array.isArray(provider.models)) continue;
+        for (const model of provider.models) {
+          const id = String(model?.id ?? '').trim();
+          if (id) out.push({ id, name: String(model?.name ?? id), provider: providerId });
+        }
+      }
+      return out;
+    },
+  },
 };
 
 /** zcode 的 CLI 入口（应用内脚本）；配置源是用户自己的 `~/.zcode/cli/config.json`。 */
@@ -72,6 +94,24 @@ export const ZCODE_HARNESS = {
   availability: { files: ['~/.zcode/cli/config.json'] },
   env: { inherit: false },
   hooks: {
+    discover() {
+      const file = join(homedir(), '.zcode', 'cli', 'config.json');
+      if (!existsSync(file)) return [];
+      const data = JSON.parse(readFileSync(file, 'utf8'));
+      const provider = 'builtin:bigmodel-coding-plan';
+      const models = data.provider?.[provider]?.models;
+      const ids = Array.isArray(models)
+        ? models.map((model) => String(model?.id ?? model)).filter(Boolean)
+        : Object.keys(models ?? {});
+      const out = ids.map((id) => ({ id, name: id }));
+      const main = String(data.model?.main ?? '');
+      const prefix = `${provider}/`;
+      if (!out.length && main.startsWith(prefix)) {
+        const id = main.slice(prefix.length);
+        out.push({ id, name: id });
+      }
+      return out;
+    },
     plan(entry, prompt, context) {
       if (!existsSync(ZCODE_JS)) throw new Error(`找不到 zcode CLI：${ZCODE_JS}`);
       const source = join(homedir(), '.zcode', 'cli', 'config.json');
@@ -148,6 +188,7 @@ export const OPENCODE_HARNESS = {
   output: { parser: 'opencode' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: true },
+  discover: { argv: ['models'], parser: 'opencode' },
   availability: { fallbacks: ['~/.opencode/bin/opencode'] },
   probe: { args: ['auth', 'list'], classify: 'exit0' },
 };
@@ -165,6 +206,7 @@ export const QODER_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  discover: { argv: ['--list-models'], parser: 'qoder-table' },
   availability: { fallbacks: ['~/.local/bin/qoderclicn', '~/.qoder-cn/entry/qodercn'] },
   probe: { args: ['--version'], classify: 'exit0' },
 };
@@ -179,6 +221,7 @@ export const DEVIN_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  discover: { command: 'devin', argv: ['models', 'list'], parser: 'devin-table' },
   // 主命令是 node（恒在），真正的 CLI 是 devin；ACP 客户端必须随包存在。
   availability: {
     commands: [{ command: 'devin', fallbacks: ['~/.local/bin/devin'], env: 'DEVIN_BIN' }],
@@ -205,6 +248,21 @@ export const CLINE_HARNESS = {
   usage: { source: 'stream', aggregate: 'sum-turns' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
   availability: { fallbacks: ['~/.local/bin/cline'] },
+  hooks: {
+    discover() {
+      const file = join(homedir(), '.cline', 'data', 'settings', 'providers.json');
+      if (!existsSync(file)) return [];
+      const data = JSON.parse(readFileSync(file, 'utf8'));
+      const out = [];
+      for (const [providerId, provider] of Object.entries(data.providers ?? {})) {
+        const model = provider?.settings?.model;
+        if (typeof model === 'string' && model.trim()) {
+          out.push({ id: model.trim(), name: `${model.trim()} (${providerId})`, provider: providerId });
+        }
+      }
+      return out;
+    },
+  },
   probe: { args: ['--version'], classify: 'exit0' },
 };
 
@@ -226,6 +284,7 @@ export const GROK_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'take-last' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: true },
+  discover: { argv: ['models'], parser: 'bullet' },
   availability: { fallbacks: ['~/.local/bin/grok'] },
   probe: { args: ['--version'], classify: 'exit0' },
 };

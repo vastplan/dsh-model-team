@@ -189,10 +189,12 @@ model_team_weekly(days: 7)
 - 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task，
   qoder/devin/grok 用 `disallowed-tools`，cline 默认 `-p` plan 档；凭证由各 CLI 自己的登录态管理，插件不存密钥。
 - devin 用随包的 `scripts/devin_acp.mjs`；zcode 需要本机 ZCode 应用与 `~/.zcode/cli/config.json`。
-- 这些是**静态配置**：改完要重载插件；设置页暂不编辑 CLI 定义。
+- **模型自动发现（默认开）**：pi / zcode / cline 读本机配置；agent / opencode / grok / devin / qoder
+  跑各自的模型列表命令。发现的模型按 `modelKey` 与 DSH 路由合并；`cliModels` 仍可用于**覆盖/补充**
+  （同 `tool + modelKey` 时显式条目优先）。发现结果缓存 30 分钟。
+- 不想自动发现就设 `discoverCli: false`，只列 `cliModels` 里的显式条目。
 - **没装/没配的 CLI 不会出现在厂商路由里**（可用性检查缓存 30s）；登录态要到调用时才会暴露。
-- **CLI 模型要逐条声明**：插件不会自动读取 pi/opencode 自己的模型配置；在 pi 里加了 GLM-5.3，
-  还要在 `cliModels` 里加一条（`tool: pi` + `model: auto/GLM-5.3`）才会出现在厂商路由里。
+- cline 的 CLI 没有完整模型列表命令，只能发现当前配置的模型。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 
 ## 数据落盘

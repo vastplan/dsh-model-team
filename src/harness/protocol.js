@@ -22,6 +22,9 @@ const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** 解析方言。`auto` = 按事件形状识别（`parse.js` 的能力），`text` = 纯文本。 */
 const PARSERS = new Set(['auto', 'jsonl', 'text', 'pi', 'opencode']);
 
+/** 自动发现模型列表的解析器。 */
+const DISCOVER_PARSERS = new Set(['lines', 'opencode', 'id-dash-name', 'bullet', 'devin-table', 'qoder-table']);
+
 /** 通用思考档；具体 CLI 可用 `thinking.values` 收窄。 */
 const DEFAULT_THINKING_VALUES = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -91,6 +94,13 @@ export function validateHarness(raw, { source = 'config' } = {}) {
 
   const probeInput = asObject(input.probe);
   const availabilityInput = asObject(input.availability);
+  const discoverInput = asObject(input.discover);
+  if (discoverInput) {
+    const parser = asString(discoverInput.parser, 'lines');
+    if (!DISCOVER_PARSERS.has(parser)) {
+      throw new Error(`${source}: harness「${id}」的 discover.parser「${parser}」不支持；可用：${[...DISCOVER_PARSERS].join(', ')}`);
+    }
+  }
 
   return Object.freeze({
     protocol: PROTOCOL_VERSION,
@@ -139,6 +149,7 @@ export function validateHarness(raw, { source = 'config' } = {}) {
     // `{ argv, env?, cwd?, stdin?, prepare? }`，用于 zcode 这种要改临时配置的 CLI。
     hooks: {
       plan: typeof input.hooks?.plan === 'function' ? input.hooks.plan : null,
+      discover: typeof input.hooks?.discover === 'function' ? input.hooks.discover : null,
     },
     env: {
       inherit: input.env?.inherit !== false,
@@ -160,6 +171,14 @@ export function validateHarness(raw, { source = 'config' } = {}) {
     },
     probe: probeInput
       ? { args: asArray(probeInput.args), classify: asString(probeInput.classify, 'exit0') }
+      : null,
+    // 自动发现模型：命令 + 解析器（zcode/pi/cline 用 hooks.discover 读配置文件）。
+    discover: discoverInput && (asArray(discoverInput.argv).length || asString(discoverInput.command).trim())
+      ? {
+        command: asString(discoverInput.command),
+        argv: asArray(discoverInput.argv),
+        parser: asString(discoverInput.parser, 'lines'),
+      }
       : null,
     // 目录构建时的可用性检查：主命令 fallbacks / 额外命令 / 额外文件。
     availability: {

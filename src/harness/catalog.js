@@ -12,6 +12,7 @@
  * 于是执行组的「厂商路由」下拉里不会出现它；装好后最多等缓存 TTL（30s）或重载插件。
  */
 import { harnessAvailable } from './availability.js';
+import { discoverAll } from './discover.js';
 import { listHarnesses } from './protocol.js';
 
 const asString = (value, fallback = '') => (value === undefined || value === null ? fallback : String(value));
@@ -25,8 +26,9 @@ const HIDDEN_LOGGED = new Set();
  * @param options.available - 可用性判定，默认 {@link harnessAvailable}（测试可注入）。
  * @returns 目录条目数组（只含本机可用的 CLI）。
  */
-export function cliCatalogEntries(config, logger, options = {}) {
-  const byId = new Map(listHarnesses().map((definition) => [definition.id, definition]));
+export async function cliCatalogEntries(config, logger, options = {}) {
+  const definitions = listHarnesses();
+  const byId = new Map(definitions.map((definition) => [definition.id, definition]));
   const available = typeof options.available === 'function' ? options.available : harnessAvailable;
   const entries = [];
 
@@ -72,6 +74,30 @@ export function cliCatalogEntries(config, logger, options = {}) {
       harness: definition.id,
       harnessModel: asString(raw.model, id),
       harnessProvider: asString(raw.provider),
+      readOnly: definition.capabilities.readOnlyByDefault !== false,
+    });
+  }
+
+  // 自动发现：每家 CLI 的 discover/hook；不可用的 CLI 已在 discoverHarness 里跳过。
+  // 显式 cliModels 优先：同 harness + modelKey 的自动条目不再重复。
+  const discovered = options.discovered
+    ?? (options.discover === false ? [] : await discoverAll(definitions, logger));
+  const explicitKeys = new Set(entries.map((entry) => `${entry.harness}:${entry.modelKey}`));
+  for (const item of discovered) {
+    const definition = byId.get(item.harness);
+    if (!definition) continue;
+    if (explicitKeys.has(`${item.harness}:${item.modelKey}`)) continue;
+    entries.push({
+      provider: `cli-${definition.id}`,
+      id: item.id,
+      name: `${item.name} · ${definition.label}`,
+      efforts: definition.thinking?.values ?? [''],
+      defaultEffort: definition.thinking?.default ?? '',
+      modelKey: item.modelKey,
+      transport: 'cli',
+      harness: definition.id,
+      harnessModel: item.harnessModel,
+      harnessProvider: item.provider,
       readOnly: definition.capabilities.readOnlyByDefault !== false,
     });
   }
