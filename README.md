@@ -190,6 +190,7 @@ model_team_weekly(days: 7)
   qoder/devin/grok 用 `disallowed-tools`，cline 默认 `-p` plan 档；凭证由各 CLI 自己的登录态管理，插件不存密钥。
 - devin 用随包的 `scripts/devin_acp.mjs`；zcode 需要本机 ZCode 应用与 `~/.zcode/cli/config.json`。
 - 这些是**静态配置**：改完要重载插件；设置页暂不编辑 CLI 定义。
+- **没装/没配的 CLI 不会出现在厂商路由里**（可用性检查缓存 30s）；登录态要到调用时才会暴露。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 
 ## 数据落盘

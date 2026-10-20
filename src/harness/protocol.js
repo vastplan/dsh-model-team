@@ -90,6 +90,7 @@ export function validateHarness(raw, { source = 'config' } = {}) {
   }
 
   const probeInput = asObject(input.probe);
+  const availabilityInput = asObject(input.availability);
 
   return Object.freeze({
     protocol: PROTOCOL_VERSION,
@@ -160,6 +161,20 @@ export function validateHarness(raw, { source = 'config' } = {}) {
     probe: probeInput
       ? { args: asArray(probeInput.args), classify: asString(probeInput.classify, 'exit0') }
       : null,
+    // 目录构建时的可用性检查：主命令 fallbacks / 额外命令 / 额外文件。
+    availability: {
+      fallbacks: asArray(availabilityInput?.fallbacks),
+      commands: (Array.isArray(availabilityInput?.commands) ? availabilityInput.commands : [])
+        .map((item) => asObject(item))
+        .filter(Boolean)
+        .map((item) => ({
+          command: asString(item.command),
+          fallbacks: asArray(item.fallbacks),
+          env: asString(item.env),
+        }))
+        .filter((item) => item.command),
+      files: asArray(availabilityInput?.files),
+    },
     timeoutMs: Number(input.timeoutMs ?? 0) || 0,
     silenceMs: Number(input.silenceMs ?? 0) || 0,
     cwd: asString(input.cwd, 'workspace'),

@@ -41,6 +41,7 @@
 | `usage` | 否 | `{ source: "stream", aggregate: "auto" }` | 用量口径；`aggregate` 传给解析器 |
 | `capabilities` | 否 | 只读 | `{ readOnlyByDefault, streamsUsage, backgroundAgents }` |
 | `probe` | 否 | `null` | `{ args, classify }`，就绪探测（设置页用，P2） |
+| `availability` | 否 | `{}` | `{ fallbacks, commands: [{ command, fallbacks, env }], files }`；目录构建时判断 CLI 是否可用，不可用则不列出 |
 | `timeoutMs` / `silenceMs` | 否 | `0` | 机制层自己的总超时/无输出看门狗（0=不启用） |
 | `cwd` | 否 | `workspace` | `workspace` 或绝对路径 |
 | `hooks.plan` | 否 | `null` | 代码型钩子（仅内置/JS）：`(entry, prompt, context) => { argv, env?, cwd?, stdin?, prepare? }`；用于 zcode 这类要改临时配置的 CLI |
@@ -177,7 +178,19 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 
 ---
 
-## 5. 安全与只读
+## 5. 可用性过滤
+
+`listCatalog()` 构建目录时会检查每家 CLI 的 `availability`：
+
+- 主命令：绝对路径 / PATH / `fallbacks`；
+- 额外命令：`commands`（devin 的 `devin`，可用 `DEVIN_BIN` 覆盖）；
+- 额外文件：`files`（zcode 的 `~/.zcode/cli/config.json`、devin 的随包脚本）。
+
+不可用的 CLI **不会进入模型目录**，执行组的「厂商路由」里也就看不到它；
+结果缓存 30s，装好 CLI 后最多等 30s 或重载插件。
+**只判断装没装/配没配，不判断登录态**——未登录仍会列出，调用时由 stderr 暴露。
+
+## 6. 安全与只读
 
 - **显式 opt-in**：只有配置了 `cliModels` 才会调用 CLI；不会自动发现本机 CLI。
 - **只走 argv**：`spawn(argv, {shell:false})`，不拼 shell 字符串。
@@ -192,7 +205,7 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 
 ---
 
-## 6. 测试
+## 7. 测试
 
 ```bash
 node --test scripts/harness.test.mjs

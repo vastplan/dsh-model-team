@@ -4,6 +4,8 @@
  * 能纯数据表达的就纯数据（agent / pi / opencode / qoder / devin / cline / grok）；
  * zcode 要写临时 config 并改 HOME，用 `hooks.plan` 表达（代码型，YAML 配置给不了）。
  *
+ * `availability` 决定「本机是否装好/配好」：不可用的 CLI 不会出现在模型目录的厂商路由里。
+ *
  * 想接新 CLI：优先在 `cordis.patch.yml` 的 `harnesses` 里写定义；确实需要
  * 改配置/环境时再加一个内置定义 + hook。
  */
@@ -22,6 +24,7 @@ export const AGENT_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'take-last' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  availability: { fallbacks: ['~/.local/bin/agent'] },
   probe: { args: ['status'], classify: 'exit0' },
 };
 
@@ -43,6 +46,7 @@ export const PI_HARNESS = {
   output: { parser: 'pi' },
   usage: { source: 'stream', aggregate: 'sum-turns' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  availability: { fallbacks: ['~/.local/bin/pi'] },
   probe: { args: ['--version'], classify: 'exit0' },
   env: { unset: ['FORCE_COLOR'] },
 };
@@ -64,6 +68,8 @@ export const ZCODE_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  // 没有配置文件的 zcode 等于没装好：直接隐藏。
+  availability: { files: ['~/.zcode/cli/config.json'] },
   env: { inherit: false },
   hooks: {
     plan(entry, prompt, context) {
@@ -142,6 +148,7 @@ export const OPENCODE_HARNESS = {
   output: { parser: 'opencode' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: true },
+  availability: { fallbacks: ['~/.opencode/bin/opencode'] },
   probe: { args: ['auth', 'list'], classify: 'exit0' },
 };
 
@@ -158,6 +165,7 @@ export const QODER_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  availability: { fallbacks: ['~/.local/bin/qoderclicn', '~/.qoder-cn/entry/qodercn'] },
   probe: { args: ['--version'], classify: 'exit0' },
 };
 
@@ -171,6 +179,11 @@ export const DEVIN_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  // 主命令是 node（恒在），真正的 CLI 是 devin；ACP 客户端必须随包存在。
+  availability: {
+    commands: [{ command: 'devin', fallbacks: ['~/.local/bin/devin'], env: 'DEVIN_BIN' }],
+    files: ['{pkgDir}/scripts/devin_acp.mjs'],
+  },
 };
 
 /** cline：`--json` 出 NDJSON；默认 `-p` plan 档只读；强度 `--thinking`（max→xhigh）。 */
@@ -191,6 +204,7 @@ export const CLINE_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'sum-turns' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  availability: { fallbacks: ['~/.local/bin/cline'] },
   probe: { args: ['--version'], classify: 'exit0' },
 };
 
@@ -212,6 +226,7 @@ export const GROK_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'take-last' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: true },
+  availability: { fallbacks: ['~/.local/bin/grok'] },
   probe: { args: ['--version'], classify: 'exit0' },
 };
 

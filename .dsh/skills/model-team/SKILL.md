@@ -58,6 +58,7 @@ cliModels:
 - CLI 条目必须有绝对 `workspace`（cwd）；`files` 只给清单，CLI 自己读。
 - 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task；
   凭证由各 CLI 自己的登录态管理，插件不存密钥。
+- 没装/没配的 CLI 不会出现在厂商路由里（缓存 30s）；未登录仍会列出，调用时失败。
 - 字段、占位符、argv 顺序、错误/取消语义见 `docs/harness-protocol.md`。
 
 ## Task Packet 写法

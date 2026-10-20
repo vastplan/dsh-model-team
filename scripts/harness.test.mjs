@@ -14,6 +14,7 @@ import {
   buildLaunch, clearHarnesses, harnessFor, listHarnesses, registerHarness, validateHarness,
 } from '../src/harness/protocol.js';
 import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
+import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
@@ -152,7 +153,7 @@ test('cliCatalogEntries 生成合成 provider 与 harness 字段', () => {
       { id: 'k3', tool: 'pi', provider: 'magpie', model: 'group/auto-kimi-k3', modelKey: 'kimi-k3' },
       { id: 'missing', tool: 'nope', model: 'x' },
     ],
-  });
+  }, undefined, { available: () => true });
   assert.equal(entries.length, 1);
   assert.equal(entries[0].provider, 'cli-pi');
   assert.equal(entries[0].harnessModel, 'group/auto-kimi-k3');
@@ -339,4 +340,19 @@ test('zcode hook：写临时 config 并改 HOME', (t) => {
     rmSync(home, { recursive: true, force: true });
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('harnessAvailable：缺 CLI 判为不可用，node 判为可用', () => {
+  clearAvailabilityCache();
+  const missing = validateHarness({ id: 'missing-xyz', command: 'definitely-not-a-real-cli-xyz' });
+  assert.equal(harnessAvailable(missing), false);
+  const node = validateHarness({ id: 'node-ok', command: process.execPath });
+  assert.equal(harnessAvailable(node), true);
+});
+
+test('cliCatalogEntries：不可用的 CLI 不进入厂商目录', () => {
+  freshRegistry();
+  const config = { cliModels: [{ id: 'k3', tool: 'pi', model: 'auto/kimi-k3' }] };
+  assert.equal(cliCatalogEntries(config, null, { available: () => false }).length, 0);
+  assert.equal(cliCatalogEntries(config, null, { available: () => true }).length, 1);
 });
