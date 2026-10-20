@@ -1961,6 +1961,16 @@ window.__ModuleLoader__.load({
           setConfigError(error instanceof Error ? error.message : String(error));
         }
       }, [api]);
+      // 只重拉目录（范围变更后用）：配置以 savePrefs 的写回结果为准，不再二次读。
+      const loadCatalog = React.useCallback(async () => {
+        if (!api) return;
+        try {
+          const cat = await api.catalog();
+          if (cat.ok) setCatalog(cat.value.models ?? []);
+        } catch {
+          /* 目录拉取失败时保留旧列表，用户可手动刷新 */
+        }
+      }, [api]);
       React.useEffect(() => { loadConfig(); }, [loadConfig]);
 
       if (state.phase === 'loading') {
@@ -2001,8 +2011,10 @@ window.__ModuleLoader__.load({
           ? null
           : h(ScopeEditor, {
             api, prefs: config?.prefs, harnesses: config?.harnesses,
-            // 范围变了，catalog 也跟着变：重新拉一次，否则下拉里还是旧的范围。
-            onChanged: () => { loadConfig(); },
+            // 立刻用写回结果更新配置（乐观、不做二次读）：再拉一次 configuration 时
+            // 若拿到保存前的快照，芯片会闪回「已选」，看起来就是「点了取消没生效」。
+            // catalog 必须重拉：范围内的模型集合变了。
+            onChanged: (value) => { setConfig(value); loadCatalog(); },
           }),
 
         config?.ready === false

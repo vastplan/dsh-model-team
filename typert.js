@@ -91,6 +91,13 @@ const prefsSchema = z.object({
   reportModel: z.string(), concurrency: z.number(), reportDir: z.string(), autoUpload: z.boolean(),
   /** 总开关：保存数据 / 启用周报与报告。老配置缺这个键时按 false 处理。 */
   persistData: z.boolean().optional(),
+  /**
+   * 可用 CLI 范围：`null` = 全部（含 `'dsh'`）。
+   *
+   * **必须声明在这里**：`savePrefs` 的入参是 strict codec，schema 里没有的键会被裁掉——
+   * 早先漏了这一项，页面切芯片后 Host 收到的还是旧范围，表现成「点了取消没反应」。
+   */
+  enabledHarnesses: z.array(z.string()).nullable().optional(),
 });
 
 const bindingsSchema = z.object({
@@ -103,6 +110,13 @@ const configResult = z.object({
   groups: z.array(groupSchema),
   prefs: prefsSchema,
   bindings: bindingsSchema,
+  /** 范围选择器的选项：`dsh` + 已登记 harness，附本机可用性。 */
+  harnesses: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    available: z.boolean(),
+    kind: z.string(),
+  })).optional(),
   ready: z.boolean(),
 });
 
