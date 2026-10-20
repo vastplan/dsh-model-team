@@ -206,7 +206,9 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
   `zcode/` → `grok/`）；
 - 结果缓存 30 分钟；装好 CLI/新增模型后最多等 30 分钟或重载插件；
 - `cliModels` 优先：同 `tool + modelKey` 的显式条目覆盖自动条目；
-- `discoverCli: false` 完全关闭自动发现。
+- **范围**：设置页的「可用 CLI 范围」（`prefs.enabledHarnesses`，`null`=全部，含 `'dsh'`）决定哪些 CLI 参与；
+  范围外的 CLI 不跑发现、不进目录，调用时也会被拒绝。
+- `discoverCli: false` 完全关闭自动发现（范围仍生效）。
 
 **注意**：agent/devin/grok 的模型 id 里带 effort/fast 变体（如 `swe-2-max`、`claude-opus-5-5-high`），
 自动发现会按逻辑 id 去重，但**不会把 effort 变体合并**（它们是不同的 id，本机全量约 1,300 条）。

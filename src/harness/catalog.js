@@ -10,6 +10,9 @@
  *
  * **可用性过滤**：CLI 没装/没配（`availability` 检查失败）时，条目**不进入目录**，
  * 于是执行组的「厂商路由」下拉里不会出现它；装好后最多等缓存 TTL（30s）或重载插件。
+ *
+ * **范围过滤**：`options.enabled`（Set/数组）里的 harness 才会被加载；不在范围的 CLI
+ * 既不发现模型、也不生成条目，调用侧也会拒绝（见 `runCandidate`）。
  */
 import { harnessAvailable } from './availability.js';
 import { discoverAll } from './discover.js';
@@ -24,17 +27,23 @@ const HIDDEN_LOGGED = new Set();
  * @param config - 插件静态配置（读 `cliModels`）。
  * @param logger - 可选日志器；未知 harness / 空 id 只 warn 跳过，不让插件起不来。
  * @param options.available - 可用性判定，默认 {@link harnessAvailable}（测试可注入）。
- * @returns 目录条目数组（只含本机可用的 CLI）。
+ * @param options.enabled - 可用 harness id 集合；缺省 = 全部。
+ * @returns 目录条目数组（只含本机可用且在范围内的 CLI）。
  */
 export async function cliCatalogEntries(config, logger, options = {}) {
   const definitions = listHarnesses();
   const byId = new Map(definitions.map((definition) => [definition.id, definition]));
   const available = typeof options.available === 'function' ? options.available : harnessAvailable;
+  const enabled = options.enabled
+    ? new Set(Array.from(options.enabled, (item) => String(item)))
+    : null;
+  const inScope = (id) => !enabled || enabled.has(id);
   const entries = [];
 
   for (const raw of Array.isArray(config?.cliModels) ? config.cliModels : []) {
     if (!raw || typeof raw !== 'object') continue;
     const tool = asString(raw.tool).trim();
+    if (!inScope(tool)) continue;
     const definition = byId.get(tool);
     if (!definition) {
       logger?.warn?.(`model-team: cliModels 里的 tool「${tool || '(空)'}」没有对应的 harness 定义，已跳过`);
@@ -80,8 +89,11 @@ export async function cliCatalogEntries(config, logger, options = {}) {
 
   // 自动发现：每家 CLI 的 discover/hook；不可用的 CLI 已在 discoverHarness 里跳过。
   // 显式 cliModels 优先：同 harness + modelKey 的自动条目不再重复。
+  const scopedDefinitions = enabled
+    ? definitions.filter((definition) => enabled.has(definition.id))
+    : definitions;
   const discovered = options.discovered
-    ?? (options.discover === false ? [] : await discoverAll(definitions, logger));
+    ?? (options.discover === false ? [] : await discoverAll(scopedDefinitions, logger));
   const explicitKeys = new Set(entries.map((entry) => `${entry.harness}:${entry.modelKey}`));
   for (const item of discovered) {
     const definition = byId.get(item.harness);

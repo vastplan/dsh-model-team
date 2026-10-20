@@ -24,8 +24,9 @@ import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
-  cliCatalogEntries, harnessFor, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
+  cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
 } from './src/harness/index.js';
+import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
   candidatesOf, openConfig, readBinding, readBindings, readGroups, readPrefs,
@@ -131,10 +132,44 @@ export function modelKeyOf(provider, id, name) {
   return stripped.replace(/[-_.]/g, '-').replace(/-+/g, '-');
 }
 
-/** 枚举 DSH 当前可调用的全部模型（DSH 原生 + `cliModels` 声明的 CLI 模型）。 */
-async function listCatalog(ctx, config = {}) {
+/**
+ * 设置页「可用 CLI 范围」的选项：DSH 自己 + 已登记的全部 harness。
+ *
+ * `available` 只做本机是否装好/配好的静态判断（与目录过滤同一口径），
+ * 未安装的也列出来，但开关置灰——让用户知道「为什么它不在目录里」。
+ */
+function harnessScopeOptions() {
+  return [
+    { id: 'dsh', label: 'DSH（内置模型）', available: true, kind: 'dsh' },
+    ...listHarnesses().map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      available: harnessAvailable(definition),
+      kind: 'cli',
+    })),
+  ];
+}
+
+/** 可用 CLI 范围的归一：`null` = 全部；否则只保留集合内的 id。 */
+function enabledScopes(prefs) {
+  const list = prefs?.enabledHarnesses;
+  return Array.isArray(list) ? new Set(list.map((item) => String(item))) : null;
+}
+
+/**
+ * 枚举 DSH 当前可调用的全部模型。
+ *
+ * - `'dsh'` 在范围内才列 DSH 原生模型；
+ * - CLI 只列范围内的（`cliCatalogEntries` 的 `enabled`）；
+ * - 范围外 CLII 不做模型发现。
+ *
+ * @param prefs - 用户偏好（读 `enabledHarnesses`）；缺省 = 全部。
+ */
+async function listCatalog(ctx, config = {}, prefs = null) {
+  const scopes = enabledScopes(prefs);
+  const dshInScope = !scopes || scopes.has('dsh');
   const catalog = [];
-  for (const provider of ctx.llm.listProviders()) {
+  for (const provider of (dshInScope ? ctx.llm.listProviders() : [])) {
     let models = [];
     try {
       models = await ctx.llm.listModels(provider.id);
@@ -166,10 +201,13 @@ async function listCatalog(ctx, config = {}) {
     }
   }
   // CLI harness 模型：显式 cliModels + 各 CLI 自动发现的模型（可用性过滤在 catalog 内）。
-  const cliEntries = await cliCatalogEntries(config, ctx.logger, {
-    ctx,
-    discover: config.discoverCli !== false,
-  });
+  const cliEntries = scopes && [...scopes].every((id) => id === 'dsh')
+    ? []
+    : await cliCatalogEntries(config, ctx.logger, {
+      ctx,
+      discover: config.discoverCli !== false,
+      enabled: scopes ? new Set([...scopes].filter((id) => id !== 'dsh')) : null,
+    });
   catalog.push(...cliEntries);
   return catalog;
 }
@@ -590,8 +628,14 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   const packet = String(args.packet ?? '').trim();
   if (!packet) throw new Error('packet 为空');
 
-  const catalog = await listCatalog(ctx, config);
-  if (!catalog.length) throw new Error('DSH 里没有已注册的 LLM provider 或 provider 未列出模型，请先在设置里配置模型');
+  const runPrefs = configStore ? readPrefs(configStore) : null;
+  const scopes = enabledScopes(runPrefs);
+  const catalog = await listCatalog(ctx, config, runPrefs);
+  if (!catalog.length) {
+    throw new Error(scopes
+      ? '可用 CLI 范围里没有可调用的模型：请到 设置 → 多模型团队 打开 DSH 或至少一个 CLI'
+      : 'DSH 里没有已注册的 LLM provider 或 provider 未列出模型，请先在设置里配置模型');
+  }
   const viaSubagent = args.mode === 'subagent';
   if (viaSubagent && !ctx.get('subagents')) throw new Error('mode=subagent 需要 subagents 服务');
   const allGroups = readGroups(configStore);
@@ -934,6 +978,10 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
         maxDepth: args.max_depth,
         onPhase,
       };
+      // 范围外 CLI：目录里不会出现，但旧执行组/历史点名可能残留，调用前再拦一次。
+      if (entry.transport === 'cli' && scopes && !scopes.has(entry.harness)) {
+        throw new Error(`CLI「${entry.harness}」不在可用范围内：请到 设置 → 多模型团队 打开它，或换用其它路由`);
+      }
       const result = entry.transport === 'cli'
         ? await callCli(ctx, entry, options, callSignal)
         : viaSubagent
@@ -1217,7 +1265,7 @@ async function buildWeekly(ctx, ledger, config, options, signal) {
     // `listCatalog` 与 `resolveTeam` 都在 try 内：模型配错（下线/改名）时应当
     // 落一条 `summaryError`，而不是让整个周报连已算好的聚合一起丢掉。
     try {
-      const catalog = await listCatalog(ctx, config);
+      const catalog = await listCatalog(ctx, config, storedPrefs);
       const [entry] = resolveTeam([summaryModel], catalog, []);
       const asked = `${WEEKLY_PREAMBLE}${factsForModel(facts)}\n`;
       const result = await callLlm(ctx, entry, { prompt: asked }, signal);
@@ -1332,18 +1380,26 @@ export class ModelTeamService extends TypertRemoteService {
     }, signal);
   }
 
-  /** 执行组与偏好（页面配置区读）。 */
+  /** 执行组、偏好与可用范围（页面配置区读）。 */
   async configuration() {
     const store = await this.ensureStore();
     const groups = readGroups(store);
     const prefs = readPrefs(store);
     const bindings = readBindings(store);
-    return { groups, prefs, bindings, ready: Boolean(store) };
+    return {
+      groups,
+      prefs,
+      bindings,
+      // 范围选择器用：DSH 自己 + 8 家 CLI，附「本机是否装好」。
+      harnesses: harnessScopeOptions(),
+      ready: Boolean(store),
+    };
   }
 
   /** 可选的模型目录（页面下拉框用）。 */
   async catalog() {
-    const models = await listCatalog(this.ctx, this.pluginConfig ?? {});
+    const prefs = readPrefs(await this.ensureStore());
+    const models = await listCatalog(this.ctx, this.pluginConfig ?? {}, prefs);
     return { models };
   }
 
@@ -1352,7 +1408,7 @@ export class ModelTeamService extends TypertRemoteService {
     const raw = String(spec ?? '').trim();
     let catalog = [];
     try {
-      catalog = await listCatalog(this.ctx, this.pluginConfig ?? {});
+      catalog = await listCatalog(this.ctx, this.pluginConfig ?? {}, readPrefs(await this.ensureStore()));
     } catch {
       catalog = [];
     }
@@ -1377,7 +1433,7 @@ export class ModelTeamService extends TypertRemoteService {
 
     // 校验思考强度：模型不支持该档时不能存进去，否则每次调用都会被 provider 拒绝
     // （真机踩过：Kimi K3 在 magpie 下没有 reasoningEfforts，却存了 @high）。
-    const catalog = await listCatalog(this.ctx, this.pluginConfig ?? {});
+    const catalog = await listCatalog(this.ctx, this.pluginConfig ?? {}, readPrefs(await this.ensureStore()));
     const problems = [];
     for (const candidate of candidates) {
       if (!candidate.reasoningEffort) continue;
@@ -1504,6 +1560,12 @@ export class ModelTeamService extends TypertRemoteService {
       autoUpload: request?.autoUpload === undefined ? (current.autoUpload === true) : request.autoUpload === true,
       // 总开关：只有显式传 true 才算打开（任何其它值都落 false）。
       persistData: request?.persistData === undefined ? current.persistData === true : request.persistData === true,
+      // null = 全开；数组 = 显式范围（去重、去空）。
+      enabledHarnesses: request?.enabledHarnesses === undefined
+        ? (current.enabledHarnesses ?? null)
+        : (Array.isArray(request.enabledHarnesses)
+          ? [...new Set(request.enabledHarnesses.map((item) => String(item).trim()).filter(Boolean))]
+          : null),
     });
     return await this.configuration();
   }

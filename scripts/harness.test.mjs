@@ -16,6 +16,7 @@ import {
 import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
 import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
 import { logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
+import { DEFAULT_PREFS, readPrefs } from '../src/groups.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
@@ -256,6 +257,42 @@ test('runTeam：DSH 路径不受 CLI 重构影响', async () => {
   assert.match(outcome.models[0].text, /dsh-ok/);
 });
 
+test('runTeam：可用范围关掉 dsh 后，点名 DSH 模型直接拒绝', async () => {
+  freshRegistry();
+  const { runTeam } = await import('../index.js');
+  const config = { toolName: 'model_team', models: ['p/m'], cliModels: [], discoverCli: false };
+  const configStore = {
+    table: (name) => ({
+      // 只开 grok：dsh 与其它 CLI 都在范围外。
+      get: () => (name === 'prefs' ? { persistData: false, enabledHarnesses: ['grok'] } : undefined),
+      entries: () => [],
+    }),
+  };
+  const ctx = {
+    llm: {
+      listProviders: () => [{ id: 'p' }],
+      listModels: async () => [{ id: 'm', name: 'M' }],
+      resolveModelInfo: async () => ({ reasoning: { efforts: [], defaultEffort: '' } }),
+      stream: async function* () { yield { type: 'text-delta', text: 'should-not-run' }; },
+    },
+    get: () => undefined,
+    logger: { warn() {}, info() {} },
+    on: () => () => {},
+  };
+  await assert.rejects(
+    () => runTeam(
+      ctx,
+      { append() {}, updateProgress() {} },
+      { kind: 'reason', packet: 'hi', mode: 'llm', workspace: '/tmp', models: ['p/m'] },
+      config,
+      configStore,
+      new AbortController().signal,
+      undefined,
+    ),
+    /可用 CLI 范围里没有可调用的模型/,
+  );
+});
+
 test('内置 8 家 harness 全部注册', () => {
   freshRegistry();
   assert.deepEqual(
@@ -411,4 +448,32 @@ test('cliCatalogEntries：自动发现条目 + 显式覆盖', async () => {
   });
   assert.equal(overridden.length, 1);
   assert.equal(overridden[0].id, 'k3');
+});
+
+test('prefs.enabledHarnesses：null/缺失 = 全开，数组 = 显式范围', () => {
+  assert.equal(DEFAULT_PREFS.enabledHarnesses, null);
+  assert.equal(readPrefs({ table: () => ({ get: () => ({}) }) }).enabledHarnesses, null);
+  assert.deepEqual(
+    readPrefs({ table: () => ({ get: () => ({ enabledHarnesses: ['dsh', 'pi', 'pi', ' '] }) }) }).enabledHarnesses,
+    ['dsh', 'pi'],
+  );
+  assert.equal(readPrefs({ table: () => ({ get: () => ({ enabledHarnesses: null }) }) }).enabledHarnesses, null);
+});
+
+test('cliCatalogEntries：范围外 CLI 不发现、不生成条目', async () => {
+  freshRegistry();
+  const config = { cliModels: [{ id: 'k3', tool: 'pi', model: 'auto/kimi-k3', modelKey: 'kimi-k3' }] };
+  const outside = await cliCatalogEntries(config, null, {
+    available: () => true,
+    discover: false,
+    enabled: new Set(['grok']),
+  });
+  assert.equal(outside.length, 0);
+  const inside = await cliCatalogEntries(config, null, {
+    available: () => true,
+    discover: false,
+    enabled: new Set(['pi']),
+  });
+  assert.equal(inside.length, 1);
+  assert.equal(inside[0].harness, 'pi');
 });

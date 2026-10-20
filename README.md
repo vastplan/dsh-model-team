@@ -192,7 +192,9 @@ model_team_weekly(days: 7)
 - **模型自动发现（默认开）**：pi / zcode / cline 读本机配置；agent / opencode / grok / devin / qoder
   跑各自的模型列表命令。发现的模型按 `modelKey` 与 DSH 路由合并；`cliModels` 仍可用于**覆盖/补充**
   （同 `tool + modelKey` 时显式条目优先）。发现结果缓存 30 分钟。
-- 不想自动发现就设 `discoverCli: false`，只列 `cliModels` 里的显式条目。
+- **可用 CLI 范围**：设置页最上方的「可用 CLI 范围」用芯片选择要启用的 CLI（DSH 自己也在里面）。
+  范围外的 CLI 不发现模型、不进厂商路由，也不允许调用；执行组编辑器里的模型选项由它决定。
+- 不想自动发现就设 `discoverCli: false`，只列 `cliModels` 里的显式条目（范围仍然生效）。
 - **没装/没配的 CLI 不会出现在厂商路由里**（可用性检查缓存 30s）；登录态要到调用时才会暴露。
 - cline 的 CLI 没有完整模型列表命令，只能发现当前配置的模型。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。

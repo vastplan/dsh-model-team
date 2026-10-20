@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const NS = 'model-team';
     // 构建标记：浏览器控制台会打印，用来确认拿到的是哪一版（排查缓存用）。
-    const BUILD = 'v53-fix-stop-dock';
+    const BUILD = 'v54-cli-scope';
     const BUNDLE = '@vastplan/model-team';
 
     const zh = {
@@ -511,6 +511,9 @@ window.__ModuleLoader__.load({
 .mt-prefTitle { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
 .mt-prefHint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 .mt-prefControl { flex: none; display: flex; align-items: center; gap: 8px; }
+/* 范围列表：一行一个 harness，行间细分割线 */
+.mt-prefList { display: flex; flex-direction: column; }
+.mt-prefList .mt-prefRow:first-of-type { border-top: .5px solid var(--dsw-alias-border-l1); }
 
 /* 开关：关 = 中性轨道；开 = 品牌色轨道 + 同色描边 + 轻微外发光。
    三重强化是刻意的：单靠 --dsw-alias-brand-primary 在部分主题下与轨道对比不足，
@@ -1589,6 +1592,78 @@ window.__ModuleLoader__.load({
      *
      * 执行组共用一份；这里只决定「派谁上场」。
      */
+    /**
+     * 可用 CLI 范围：决定「下面模型选择里有哪些厂商路由」。
+     *
+     * 交互与「活动绑定」一致（点芯片切换、✓ 标记、已选计数），因为它也是**选择**而不是开关；
+     * 只有范围内（且本机已装）的 CLI 才会被发现模型、进目录、允许调用。
+     * DSH 用特殊 id `'dsh'`：关掉它连原生 provider 模型一起不列。
+     */
+    function ScopeEditor({ api, prefs, harnesses, onChanged }) {
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState('');
+      const scope = Array.isArray(prefs?.enabledHarnesses) ? prefs.enabledHarnesses : null;
+      const options = Array.isArray(harnesses) && harnesses.length
+        ? harnesses
+        : [{ id: 'dsh', label: 'DSH（内置模型）', available: true, kind: 'dsh' }];
+      const picked = scope ?? options.map((item) => item.id);
+      const isOn = (id) => picked.includes(id);
+
+      const toggle = async (id) => {
+        const next = new Set(picked);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        const values = [...next];
+        setBusy(true); setError('');
+        try {
+          const result = await api.savePrefs({
+            reportModel: prefs?.reportModel ?? '',
+            concurrency: prefs?.concurrency ?? 0,
+            reportDir: prefs?.reportDir ?? '',
+            autoUpload: prefs?.autoUpload === true,
+            persistData: prefs?.persistData === true,
+            // 全选归一成 null：以后新增 CLI 默认也在范围内。
+            enabledHarnesses: values.length === options.length ? null : values,
+          });
+          if (result?.ok) onChanged(result.value);
+          else setError(String(result?.error?.message ?? result?.error ?? '保存失败（未返回原因）'));
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const installed = options.filter((item) => item.kind === 'dsh' || item.available !== false).length;
+      return h('section', { className: 'mt-row' },
+        h('div', { className: 'mt-groupHead' },
+          h('h2', { className: 'mt-rowTitle' }, '可用 CLI 范围'),
+          h('span', { className: 'mt-dim', style: { fontSize: 12 } },
+            `已选 ${picked.length}/${options.length} · 本机可用 ${installed}`)),
+        h('p', { className: 'mt-rowHint' },
+          '先选范围，再选模型：范围内的 CLI 才会被发现模型并出现在厂商路由里；'
+          + '范围外的既不加载模型，也不允许调用。未安装的置灰。'),
+        h('div', { className: 'mt-chips' },
+          options.map((item) => {
+            const on = isOn(item.id);
+            const missing = item.kind === 'cli' && item.available === false;
+            return h('button', {
+              key: item.id,
+              className: on ? 'mt-chip mt-chipOn' : 'mt-chip',
+              disabled: busy || missing,
+              onClick: () => toggle(item.id),
+              title: missing
+                ? '本机未安装或未配置：装好后重载插件即可选'
+                : (item.kind === 'dsh'
+                  ? 'DSH 原生模型（含 subagent 路径）'
+                  : `${item.label} 的模型会自动发现`),
+            }, [
+              on ? h('span', { key: 'check', className: 'mt-chipCheck' }, '✓') : null,
+              on || !missing ? item.label : `${item.label}（未安装）`,
+            ]);
+          })),
+        error ? h('p', { className: 'mt-error' }, `保存失败：${error}`) : null);
+    }
+
     function BindingsEditor({ api, groups, bindings, onChanged }) {
       const [busy, setBusy] = React.useState(false);
       const [error, setError] = React.useState('');
@@ -1670,6 +1745,7 @@ window.__ModuleLoader__.load({
             reportDir: prefs?.reportDir ?? '',
             autoUpload: prefs?.autoUpload === true,
             persistData: prefs?.persistData === true,
+            enabledHarnesses: prefs?.enabledHarnesses ?? null,
             ...patch,
           });
           if (result?.ok) onChanged(result.value);
@@ -1919,6 +1995,15 @@ window.__ModuleLoader__.load({
           data.settings?.build?.hostFresh === false
             ? h('p', { className: 'mt-error' }, `⚠ ${data.settings.build.note}`)
             : null),
+
+        // 范围在最上面：它决定下面的执行组能选到哪些厂商路由。
+        config?.ready === false
+          ? null
+          : h(ScopeEditor, {
+            api, prefs: config?.prefs, harnesses: config?.harnesses,
+            // 范围变了，catalog 也跟着变：重新拉一次，否则下拉里还是旧的范围。
+            onChanged: () => { loadConfig(); },
+          }),
 
         config?.ready === false
           ? h('section', { className: 'mt-row' },

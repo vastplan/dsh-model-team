@@ -61,6 +61,7 @@ cliModels:
 - 没装/没配的 CLI 不会出现在厂商路由里（缓存 30s）；未登录仍会列出，调用时失败。
 - 默认自动发现各 CLI 的模型（读配置或跑模型列表命令，缓存 30 分钟）；`cliModels` 可覆盖/补充，
   同 `tool + modelKey` 时显式条目优先。不想发现就设 `discoverCli: false`。
+- 设置页最上方「可用 CLI 范围」决定哪些 CLI 参与（DSH 也在范围内）；范围外不发现、不列、不可调用。
 - 字段、占位符、argv 顺序、错误/取消语义见 `docs/harness-protocol.md`。
 
 ## Task Packet 写法

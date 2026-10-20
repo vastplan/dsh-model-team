@@ -77,6 +77,13 @@ export const CONFIG_SPEC = defineDomain({
        * 读出来按 `undefined` 处理，由 `readPrefs` 统一归一成 `false`。
        */
       persistData: z.boolean().optional(),
+      /**
+       * 可用 CLI 范围：允许被选择/调用的 harness id 列表（`'dsh'` 表示 DSH 原生模型）。
+       *
+       * `null`/缺失 = 全部启用（默认）。空数组 = 全部关闭（只剩显式点名也无法调用）。
+       * 老记录读到 `undefined` 时由 {@link readPrefs} 归一成 `null`，行为保持「全开」。
+       */
+      enabledHarnesses: z.array(z.string()).nullable().optional(),
     })),
     /**
      * 活动类型 → 参与的执行组 id 列表。
@@ -150,13 +157,20 @@ export const DEFAULT_PREFS = Object.freeze({
   autoUpload: false,
   /** 总开关：保存数据 / 启用周报与报告。默认关。 */
   persistData: false,
+  /** 可用 CLI 范围：`null` = 全部（含 dsh）；数组 = 仅这些。 */
+  enabledHarnesses: null,
 });
 
 export function readPrefs(config) {
   const stored = config ? config.table('prefs').get('default') : null;
   // **总是补齐默认值**：老记录缺 `persistData` 时不能读成 undefined，
   // 否则 `if (prefs.persistData)` 这种判断看着是 false、`=== false` 判断又对不上。
-  return { ...DEFAULT_PREFS, ...(stored ?? {}) };
+  const merged = { ...DEFAULT_PREFS, ...(stored ?? {}) };
+  // `null` 与 `undefined` 都表示「全开」；只有数组才是显式范围。
+  merged.enabledHarnesses = Array.isArray(merged.enabledHarnesses)
+    ? [...new Set(merged.enabledHarnesses.map((item) => String(item).trim()).filter(Boolean))]
+    : null;
+  return merged;
 }
 
 /** 写一个执行组（新增或覆盖）。 */
