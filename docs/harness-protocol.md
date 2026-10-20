@@ -17,7 +17,7 @@
 目录层  catalog.js    —— cliModels → 合成 provider `cli-<harness>`
 ```
 
-内置定义在 [`src/harness/defs.js`](../src/harness/defs.js)：`pi`、`opencode`。
+内置定义在 [`src/harness/defs.js`](../src/harness/defs.js)：`agent`、`pi`、`zcode`、`opencode`、`qoder`、`devin`、`cline`、`grok`。
 参考实现来自 `skill-project/model-team` 的 `harness_protocol` / `runner_interface` /
 `invoke_exec` / `invoke_parse`，本插件把它收敛成纯数据 + 一个机制层。
 
@@ -35,7 +35,7 @@
 | `provider` | 否 | `null` | `{ flag, format }`，例如 pi 的 `--provider magpie` |
 | `thinking` | 否 | `null` | `{ flag, format, default, values, map, viaModelFormat }` |
 | `tools.exclude` | 否 | `null` | `{ flag, join, default }`，只读纪律的 argv 落实 |
-| `prompt` | 否 | `{ via: "argv" }` | `{ via: argv\|stdin\|file, separator, template }` |
+| `prompt` | 否 | `{ via: "argv" }` | `{ via: argv\|stdin\|file\|none, separator, template }`；`none` = 提示词已在 args 的 `{prompt}` 里 |
 | `env` | 否 | `{ inherit: true }` | `{ inherit, set, unset }` |
 | `output` | 否 | `{ parser: "auto" }` | `{ parser, args }`；parser = `auto\|jsonl\|text\|pi\|opencode` |
 | `usage` | 否 | `{ source: "stream", aggregate: "auto" }` | 用量口径；`aggregate` 传给解析器 |
@@ -43,6 +43,7 @@
 | `probe` | 否 | `null` | `{ args, classify }`，就绪探测（设置页用，P2） |
 | `timeoutMs` / `silenceMs` | 否 | `0` | 机制层自己的总超时/无输出看门狗（0=不启用） |
 | `cwd` | 否 | `workspace` | `workspace` 或绝对路径 |
+| `hooks.plan` | 否 | `null` | 代码型钩子（仅内置/JS）：`(entry, prompt, context) => { argv, env?, cwd?, stdin?, prepare? }`；用于 zcode 这类要改临时配置的 CLI |
 
 未列出的字段会被忽略；协议版本固定为 1（`PROTOCOL_VERSION`）。
 
@@ -59,6 +60,8 @@
 | `{tmp}` | 临时目录（`file` 模式写 prompt） |
 | `{prompt}` | 完整提示词（`argv` 模式） |
 | `{promptFile}` | prompt 文件路径（`file` 模式） |
+| `{node}` | 当前 Node 可执行文件（`process.execPath`） |
+| `{pkgDir}` | 插件包根（引用随包脚本，如 devin 的 ACP 客户端） |
 
 ### argv 顺序
 
@@ -75,45 +78,29 @@ command
 
 ---
 
-## 2. 三个内置定义
+## 2. 内置定义（8 家）
 
-### pi
+对齐原型 `runner_interface.ts`，全部在 [`src/harness/defs.js`](../src/harness/defs.js)：
 
-```yaml
-id: pi
-command: pi
-args: ["--print", "--mode", "json", "--no-session"]
-provider: { flag: "--provider" }
-model: { flag: "--model", format: "{model}" }
-thinking: { flag: "--thinking", default: high, values: ["", low, medium, high, xhigh, max] }
-tools: { exclude: { flag: "--exclude-tools", default: [edit, write] } }
-prompt: { via: argv, separator: "--" }
-output: { parser: pi }
-usage: { aggregate: sum-turns }
-capabilities: { readOnlyByDefault: true, streamsUsage: true }
-```
+| id | command | 关键 argv（简化） | 只读默认 | 备注 |
+| --- | --- | --- | --- | --- |
+| `agent` | `agent` | `--print --output-format stream-json --mode ask --trust --workspace {workspace} --model {model} <prompt>` | `ask` | 强度写在模型 slug（如 `gemini-3.8-flash-high`） |
+| `pi` | `pi` | `--print --mode json --no-session [--provider p] --model m --thinking e --exclude-tools edit,write -- <prompt>` | `exclude-tools` | 用量按 `message_end.usage` 逐轮相加 |
+| `zcode` | `node zcode.cjs` | `--prompt <prompt> --cwd {workspace} --mode plan --disallowed-tools "Bash Edit Write"` | `disallowed-tools` | 读改写用户 config，`HOME` 指到临时目录（**hook**） |
+| `opencode` | `opencode` | `run --format json --thinking -m {model}#{thinking} <prompt>` | `OPENCODE_PERMISSION` | 强度拼进 `#variant`；v2 事件无 usage |
+| `qoder` | `qoderclicn` | `-p --output-format stream-json --no-session-persistence -m m --reasoning-effort e --disallowed-tools Write,Edit -- <prompt>` | `disallowed-tools` | 可选 `--context-window`（当前未暴露） |
+| `devin` | `{node} {pkgDir}/scripts/devin_acp.mjs` | `--model m --mode ask -- <prompt>` | ACP `ask` | 随包 ACP 客户端，固定只读 |
+| `cline` | `cline` | `--json -c {workspace} -p [-P p] -m m --thinking e <prompt>` | `-p` plan | `max` 自动落 `xhigh` |
+| `grok` | `grok` | `-p <prompt> --output-format streaming-json --model m --reasoning-effort e --disallowed-tools write,search_replace` | `disallowed-tools` | 提示词必须紧跟 `-p`，用 `prompt.via: none` |
 
-### opencode
+几家的细节：
 
-```yaml
-id: opencode
-command: opencode
-args: ["run", "--format", "json", "--thinking", "--title", "vastplan-model-team"]
-model: { flag: "-m", format: "{model}#{thinking}" }   # 强度拼进 #variant
-thinking: { default: max, viaModelFormat: true }
-prompt: { via: argv }
-env:
-  set:
-    OPENCODE_PERMISSION: '{"edit":"deny","write":"deny","bash":{"*":"deny"},"task":"deny"}'
-    OPENCODE_DISABLE_DEFAULT_PLUGINS: "true"
-output: { parser: opencode }
-capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: true }
-```
-
-> `harnessModel` 要写**完整通道**（如 `opencode/space-bunny-free`），因为 opencode 的
-> `-m` 需要 `provider/model#variant`。
-
----
+- **zcode**：必须装 ZCode 应用、且有 `~/.zcode/cli/config.json`；hook 把
+  `defaultVariant` 改成本次强度，并把 `HOME` 指到 `${tmp}/zcode-home-*` 隔离本机配置。
+- **devin**：`scripts/devin_acp.mjs` 随包发布，用 `DEVIN_BIN` 环境变量可覆盖 `devin` 可执行文件；
+  会话固定 `ask`，`set_mode` 失败即失败。
+- **cline**：默认 `-p`（plan）只读；要 act 档需要另写一个定义（或覆盖 `args`）。
+- **grok**：`prompt.via: none`，所以 `{prompt}` 必须出现在 `args` 里。
 
 ## 3. 在配置里接新 CLI
 
@@ -142,6 +129,7 @@ capabilities: { readOnlyByDefault: true, streamsUsage: true, backgroundAgents: t
             modelKey: kimi-k3
 ```
 
+- 8 家的示例条目见 [`docs/cli-models.example.json`](cli-models.example.json)，按本机实际模型/路由改。
 - `tool` 必须是已登记的 harness id（内置或 `harnesses` 里定义的）。
 - 合成 provider 是 `cli-<tool>`；上面两条分别得到 `cli-pi/k3`、`cli-foo/...`。
 - `modelKey` 决定页面把哪些路由聚成一个执行组。要和 DSH 的 `kimi-k3` 合组，
@@ -210,8 +198,8 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 node --test scripts/harness.test.mjs
 ```
 
-覆盖：pi/opencode 的 argv、定义校验、起进程/进度/解析/用量、取消（AbortError）、
-非零退出、`cliModels` 目录、以及 `runTeam` 的 CLI 端到端路径（用 `scripts/fake-cli.mjs`，
+覆盖：8 家的 argv、zcode hook、定义校验、起进程/进度/解析/用量、取消（AbortError）、
+非零退出、`cliModels` 目录、以及 `runTeam` 的 CLI 与 DSH 双路径（用 `scripts/fake-cli.mjs`，
 不需要真实 CLI）。
 
 接新 CLI 时建议先加一个定义 + 一条测试，再接真实二进制。

@@ -150,8 +150,12 @@ model_team_weekly(days: 7)
 
 ## CLI Harness（可选）
 
-除了 DSH 已注册模型，插件还内置了 `pi` / `opencode` 两家 CLI harness 的定义，
-其余 CLI 可以在配置里按同一协议追加。定义是**纯数据**，不用改执行层。
+除了 DSH 已注册模型，插件内置了 8 家 CLI harness 定义：
+`agent` / `pi` / `zcode` / `opencode` / `qoder` / `devin` / `cline` / `grok`。
+其余 CLI 可以在配置里按同一协议追加；定义是**纯数据**，不用改执行层。
+
+各家命令、默认只读纪律与占位符见 [docs/harness-protocol.md](docs/harness-protocol.md)；
+示例模型条目见 [docs/cli-models.example.json](docs/cli-models.example.json)。
 
 配置示例（`cordis.patch.yml`）：
 
@@ -182,8 +186,9 @@ model_team_weekly(days: 7)
 - `modelKey` 与 DSH 路由一致时，页面会把它们聚成同一个执行组，可做
   `magpie/group/auto-kimi-k3 → cli-pi/k3` 的主备回落。
 - CLI 条目必须有绝对 `workspace`（作为 cwd）；`files` 只附清单，CLI 自己读。
-- 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝
-  edit/write/bash/task；凭证由各 CLI 自己的登录态管理，插件不存密钥。
+- 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task，
+  qoder/devin/grok 用 `disallowed-tools`，cline 默认 `-p` plan 档；凭证由各 CLI 自己的登录态管理，插件不存密钥。
+- devin 用随包的 `scripts/devin_acp.mjs`；zcode 需要本机 ZCode 应用与 `~/.zcode/cli/config.json`。
 - 这些是**静态配置**：改完要重载插件；设置页暂不编辑 CLI 定义。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 

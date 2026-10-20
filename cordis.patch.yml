@@ -12,7 +12,8 @@
         toolName: model_team
         reportModel: ''
         models: []
-        # CLI harness（可选）：内置 pi / opencode 定义；在 cliModels 里声明后
-        # 才会以合成 provider `cli-<harness>` 出现在模型目录里。
+        # CLI harness（可选）：内置 8 家 agent / pi / zcode / opencode / qoder /
+        # devin / cline / grok；在 cliModels 里声明后才以 `cli-<harness>` 出现。
+        # 示例条目见 docs/cli-models.example.json。
         # cliModels:
         #   - { id: k3, tool: pi, provider: magpie, model: group/auto-kimi-k3, modelKey: kimi-k3 }

@@ -1,0 +1,61 @@
+[
+  {
+    "id": "k3",
+    "tool": "pi",
+    "provider": "magpie",
+    "model": "auto/kimi-k3",
+    "name": "Kimi K3",
+    "modelKey": "kimi-k3"
+  },
+  {
+    "id": "gemini-3.8-flash",
+    "tool": "agent",
+    "model": "gemini-3.8-flash-high",
+    "name": "Gemini 3.8 Flash",
+    "modelKey": "gemini-3-8-flash"
+  },
+  {
+    "id": "glm-5.3",
+    "tool": "zcode",
+    "model": "GLM-5.3",
+    "name": "GLM-5.3",
+    "modelKey": "glm-5-3"
+  },
+  {
+    "id": "space-bunny",
+    "tool": "opencode",
+    "model": "opencode/space-bunny",
+    "name": "Space Bunny",
+    "modelKey": "space-bunny"
+  },
+  {
+    "id": "qwen-3.8-flash",
+    "tool": "qoder",
+    "model": "Qwen3.8-Flash",
+    "name": "Qwen3.8 Flash",
+    "modelKey": "qwen-3-8-flash"
+  },
+  {
+    "id": "swe-2",
+    "tool": "devin",
+    "model": "swe-2",
+    "name": "SWE-2",
+    "modelKey": "swe-2"
+  },
+  {
+    "id": "muse-1.3",
+    "tool": "cline",
+    "provider": "cline",
+    "model": "cline-free/muse-spark-1.3-contributor",
+    "name": "Muse Spark 1.3",
+    "modelKey": "muse-spark-1-3"
+  },
+  {
+    "id": "grok-4.7",
+    "tool": "grok",
+    "provider": "xai",
+    "model": "grok-4.7",
+    "name": "Grok 4.7",
+    "modelKey": "grok-4-7"
+  }
+]

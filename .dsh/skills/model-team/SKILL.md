@@ -45,8 +45,9 @@ model_team(
 
 ## CLI harness（可选）
 
-插件内置 `pi` / `opencode` 的无头模式定义；其它 CLI 在 `cordis.patch.yml` 的 `harnesses` 里按协议追加，
-再用 `cliModels` 把模型挂进目录（合成 provider `cli-<harness>`）：
+插件内置 8 家无头模式定义：`agent` / `pi` / `zcode` / `opencode` / `qoder` / `devin` / `cline` / `grok`；
+其它 CLI 在 `cordis.patch.yml` 的 `harnesses` 里按协议追加，再用 `cliModels` 把模型挂进目录
+（合成 provider `cli-<harness>`，示例见 `docs/cli-models.example.json`）：
 
 ```yaml
 cliModels:

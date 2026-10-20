@@ -4,12 +4,14 @@
  * 运行：node --test scripts/harness.test.mjs
  */
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
-  buildLaunch, clearHarnesses, harnessFor, registerHarness, validateHarness,
+  buildLaunch, clearHarnesses, harnessFor, listHarnesses, registerHarness, validateHarness,
 } from '../src/harness/protocol.js';
 import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
 
@@ -249,4 +251,92 @@ test('runTeam：DSH 路径不受 CLI 重构影响', async () => {
   assert.equal(outcome.models[0].status, 'done');
   assert.equal(outcome.models[0].tool, 'dsh-llm');
   assert.match(outcome.models[0].text, /dsh-ok/);
+});
+
+test('内置 8 家 harness 全部注册', () => {
+  freshRegistry();
+  assert.deepEqual(
+    listHarnesses().map((item) => item.id),
+    ['agent', 'cline', 'devin', 'grok', 'opencode', 'pi', 'qoder', 'zcode'],
+  );
+});
+
+test('agent / cline / grok / qoder / devin 的 argv 对齐原型', () => {
+  freshRegistry();
+  const argvOf = (id, entry) => buildLaunch(
+    harnessFor(id), entry, 'PROMPT', { workspace: '/ws', tmpDir: '/tmp/mt' },
+  ).argv;
+
+  assert.deepEqual(argvOf('agent', { harnessModel: 'gemini-3.8-flash-high' }), [
+    'agent', '--print', '--output-format', 'stream-json', '--mode', 'ask', '--trust',
+    '--workspace', '/ws', '--model', 'gemini-3.8-flash-high', 'PROMPT',
+  ]);
+
+  assert.deepEqual(argvOf('cline', { harnessModel: 'cline-free/muse', harnessProvider: 'cline' }), [
+    'cline', '--json', '-c', '/ws', '-p', '-P', 'cline', '-m', 'cline-free/muse',
+    '--thinking', 'xhigh', 'PROMPT',
+  ]);
+
+  assert.deepEqual(argvOf('grok', { harnessModel: 'grok-4.7', reasoningEffort: 'xhigh' }), [
+    'grok', '-p', 'PROMPT', '--output-format', 'streaming-json',
+    '--model', 'grok-4.7', '--reasoning-effort', 'xhigh',
+    '--disallowed-tools', 'write,search_replace',
+  ]);
+
+  assert.deepEqual(argvOf('qoder', { harnessModel: 'Qwen3.8-Flash' }), [
+    'qoderclicn', '-p', '--output-format', 'stream-json', '--no-session-persistence',
+    '-m', 'Qwen3.8-Flash', '--reasoning-effort', 'max',
+    '--disallowed-tools', 'Write,Edit', '--', 'PROMPT',
+  ]);
+
+  const devin = argvOf('devin', { harnessModel: 'swe-2' });
+  assert.equal(devin[0], process.execPath);
+  assert.match(devin[1], /scripts\/devin_acp\.mjs$/);
+  assert.deepEqual(devin.slice(2), ['--model', 'swe-2', '--mode', 'ask', '--', 'PROMPT']);
+});
+
+test('zcode hook：写临时 config 并改 HOME', (t) => {
+  freshRegistry();
+  const definition = harnessFor('zcode');
+  if (!existsSync(definition.command)) {
+    t.skip(`本机没有 ${definition.command}`);
+    return;
+  }
+  const home = mkdtempSync(join(tmpdir(), 'mt-zcode-home-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'mt-zcode-tmp-'));
+  const configDir = join(home, '.zcode', 'cli');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+    model: {},
+    provider: { 'builtin:bigmodel-coding-plan': { models: { 'GLM-5.3': { reasoning: {} } } } },
+  }));
+  const oldHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const plan = buildLaunch(
+      definition,
+      { harnessModel: 'GLM-5.3', reasoningEffort: 'max' },
+      'PROMPT',
+      { workspace: '/ws', tmpDir: tmp },
+    );
+    assert.equal(plan.argv[0], process.execPath);
+    assert.equal(plan.argv[1], definition.command);
+    assert.deepEqual(plan.argv.slice(2), [
+      '--prompt', 'PROMPT', '--cwd', '/ws', '--mode', 'plan',
+      '--disallowed-tools', 'Bash Edit Write',
+    ]);
+    assert.match(plan.env.HOME, /zcode-home-/);
+    assert.equal(typeof plan.prepare, 'function');
+    plan.prepare();
+    const written = JSON.parse(readFileSync(join(plan.env.HOME, '.zcode', 'cli', 'config.json'), 'utf8'));
+    assert.equal(written.model.main, 'builtin:bigmodel-coding-plan/GLM-5.3');
+    assert.equal(
+      written.provider['builtin:bigmodel-coding-plan'].models['GLM-5.3'].reasoning.defaultVariant,
+      'max',
+    );
+  } finally {
+    process.env.HOME = oldHome;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

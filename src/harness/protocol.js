@@ -13,6 +13,12 @@
 
 export const PROTOCOL_VERSION = 1;
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** 包根（`src/harness/` 往上两层）：定义里用 `{pkgDir}` 引用随包脚本。 */
+const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
 /** 解析方言。`auto` = 按事件形状识别（`parse.js` 的能力），`text` = 纯文本。 */
 const PARSERS = new Set(['auto', 'jsonl', 'text', 'pi', 'opencode']);
 
@@ -57,8 +63,8 @@ export function validateHarness(raw, { source = 'config' } = {}) {
   }
 
   const promptVia = asString(input.prompt?.via, 'argv');
-  if (!['argv', 'stdin', 'file'].includes(promptVia)) {
-    throw new Error(`${source}: harness「${id}」的 prompt.via 只能是 argv / stdin / file`);
+  if (!['argv', 'stdin', 'file', 'none'].includes(promptVia)) {
+    throw new Error(`${source}: harness「${id}」的 prompt.via 只能是 argv / stdin / file / none`);
   }
 
   const modelInput = asObject(input.model);
@@ -127,6 +133,11 @@ export function validateHarness(raw, { source = 'config' } = {}) {
       via: promptVia,
       separator: asString(input.prompt?.separator),
       template: asString(input.prompt?.template),
+    },
+    // 代码型钩子（配置 YAML 给不了函数）：`plan(entry, prompt, context)` 返回
+    // `{ argv, env?, cwd?, stdin?, prepare? }`，用于 zcode 这种要改临时配置的 CLI。
+    hooks: {
+      plan: typeof input.hooks?.plan === 'function' ? input.hooks.plan : null,
     },
     env: {
       inherit: input.env?.inherit !== false,
@@ -217,15 +228,42 @@ export function resolveThinking(definition, effort) {
 export function buildLaunch(definition, entry, prompt, context) {
   const workspace = asString(context?.workspace);
   const tmp = asString(context?.tmpDir);
+
+  // 代码型钩子：完全接管 argv/env（zcode 要写临时 config 并改 HOME）。
+  if (typeof definition.hooks?.plan === 'function') {
+    const custom = definition.hooks.plan(entry, prompt, { workspace, tmpDir: tmp, definition });
+    if (!custom || !Array.isArray(custom.argv) || !custom.argv.length) {
+      throw new Error(`harness「${definition.id}」的 hooks.plan 没有返回 argv`);
+    }
+    const env = {};
+    if (definition.env.inherit) Object.assign(env, process.env);
+    Object.assign(env, custom.env ?? {});
+    for (const key of definition.env.unset) delete env[key];
+    return {
+      argv: custom.argv.map((item) => String(item)),
+      env,
+      cwd: custom.cwd ?? workspace,
+      stdin: custom.stdin ?? null,
+      prepare: custom.prepare ?? null,
+      promptFile: '',
+      promptFileContent: '',
+    };
+  }
+
   const thinking = resolveThinking(definition, entry?.reasoningEffort);
   const model = asString(entry?.harnessModel ?? entry?.model);
   const provider = asString(entry?.harnessProvider);
   const promptFile = definition.prompt.via === 'file'
     ? fill(definition.prompt.template || `${tmp}/prompt.md`, { tmp, workspace })
     : '';
-  const values = { model, provider, thinking, workspace, tmp, prompt, promptFile };
+  const values = {
+    model, provider, thinking, workspace, tmp, prompt, promptFile,
+    // 随包脚本用 `{pkgDir}`；devin 的 ACP 客户端用 `{node}` 起。
+    pkgDir: PKG_DIR,
+    node: process.execPath,
+  };
 
-  const argv = [definition.command, ...definition.args.map((arg) => fill(arg, values))];
+  const argv = [fill(definition.command, values), ...definition.args.map((arg) => fill(arg, values))];
 
   if (definition.provider?.flag && provider) {
     argv.push(definition.provider.flag, fill(definition.provider.format, values));
@@ -257,7 +295,9 @@ export function buildLaunch(definition, entry, prompt, context) {
   }
 
   let stdin = null;
-  if (definition.prompt.via === 'stdin') {
+  if (definition.prompt.via === 'none') {
+    // 提示词已经由 args 里的 {prompt} 带到指定位置，不再追加。
+  } else if (definition.prompt.via === 'stdin') {
     stdin = prompt;
   } else if (definition.prompt.via === 'file') {
     // 参数里已经写了 {promptFile} 就不重复追加；否则按 separator 把文件路径补在末尾。
@@ -282,6 +322,7 @@ export function buildLaunch(definition, entry, prompt, context) {
     env,
     cwd: definition.cwd === 'workspace' ? workspace : definition.cwd,
     stdin,
+    prepare: null,
     promptFile,
     promptFileContent: promptFile ? prompt : '',
   };

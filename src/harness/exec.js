@@ -90,6 +90,8 @@ export async function runHarness(options) {
     mkdirSync(dirname(plan.promptFile), { recursive: true });
     writeFileSync(plan.promptFile, plan.promptFileContent, 'utf8');
   }
+  // 定义/钩子的 prepare 必须在 spawn 之前跑完（zcode 就在这里写临时 config）。
+  if (typeof plan.prepare === 'function') plan.prepare();
 
   const subprocess = ctx?.get?.('subprocess');
   let handle;
