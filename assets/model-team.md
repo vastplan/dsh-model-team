@@ -59,6 +59,7 @@ cliModels:
 - 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task；
   凭证由各 CLI 自己的登录态管理，插件不存密钥。
 - 没装/没配的 CLI 不会出现在厂商路由里（缓存 30s）；未登录仍会列出，调用时失败。
+- CLI 模型要逐条写进 `cliModels`：插件不会自动读取 pi/opencode 自己的模型配置。
 - 字段、占位符、argv 顺序、错误/取消语义见 `docs/harness-protocol.md`。
 
 ## Task Packet 写法

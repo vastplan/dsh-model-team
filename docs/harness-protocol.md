@@ -131,6 +131,8 @@ command
 ```
 
 - 8 家的示例条目见 [`docs/cli-models.example.json`](cli-models.example.json)，按本机实际模型/路由改。
+- **`cliModels` 是唯一来源**：插件不会自动读取各 CLI 自己的模型配置；在 pi 里加了模型，
+  也要在 `cliModels` 里加一条（`tool: pi` + `model: auto/GLM-5.3`）才会出现在目录里。
 - `tool` 必须是已登记的 harness id（内置或 `harnesses` 里定义的）。
 - 合成 provider 是 `cli-<tool>`；上面两条分别得到 `cli-pi/k3`、`cli-foo/...`。
 - `modelKey` 决定页面把哪些路由聚成一个执行组。要和 DSH 的 `kimi-k3` 合组，
