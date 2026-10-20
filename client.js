@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const NS = 'model-team';
     // 构建标记：浏览器控制台会打印，用来确认拿到的是哪一版（排查缓存用）。
-    const BUILD = 'v54-cli-scope';
+    const BUILD = 'v55-dd-width';
     const BUNDLE = '@vastplan/model-team';
 
     const zh = {
@@ -292,7 +292,10 @@ window.__ModuleLoader__.load({
   transition: transform var(--ds-transition-duration) var(--ds-ease-in-out); }
 .mt-ddButton[aria-expanded="true"] .mt-ddChevron { transform: rotate(180deg); }
 .mt-ddPanel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
-  min-width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  /* 宽度：严格跟随按钮（按钮已有 width 340），选项在面板内省略。
+     早先只写 min-width，面板会被最长选项撑到几百像素，挡住整块设置区。 */
+  width: 100%; max-width: min(420px, calc(100vw - 32px)); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 4px; padding: 4px;
   border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-2); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
 .mt-ddSearchRow { padding: 2px; }
@@ -306,13 +309,16 @@ window.__ModuleLoader__.load({
 .mt-ddPanel .mt-ddMenu { position: static; max-height: 240px; box-shadow: none;
   border: 0; padding: 0; background: transparent; }
 .mt-ddMenu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
-  min-width: 100%; max-height: 260px; overflow: auto;
+  width: 100%; max-width: min(420px, calc(100vw - 32px)); box-sizing: border-box; max-height: 260px; overflow: auto;
   margin: 0; padding: 4px; list-style: none;
   border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-2); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
 .mt-ddItem { display: flex; align-items: center; gap: 6px; padding: 5px 8px;
   border-radius: var(--dsw-radius-sm); color: var(--dsw-alias-label-primary);
-  font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap; }
+  font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap;
+  /* 长标签省略而不是撑宽面板；全文靠 title 悬停看。 */
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mt-ddLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-ddItem:hover, .mt-ddItem[data-active] { background: var(--dsw-alias-interactive-bg-hover); }
 .mt-ddItem[aria-selected="true"] { color: var(--dsw-alias-brand-primary-new-color); }
 .mt-ddCheck { flex: none; width: 12px; }
@@ -1195,7 +1201,7 @@ window.__ModuleLoader__.load({
                 onClick: () => choose(option),
               },
                 h('span', { className: 'mt-ddCheck' }, option.value === (value ?? '') ? '✓' : ''),
-                option.label))
+                h('span', { className: 'mt-ddLabel', title: option.label }, option.label)))
               : h('li', { className: 'mt-ddItem mt-ddEmptyItem' }, '没有匹配的项'))) : null);
     }
 
