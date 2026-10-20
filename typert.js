@@ -113,6 +113,11 @@ const catalogResult = z.object({
     name: z.string(),
     efforts: z.array(z.string()),
     defaultEffort: z.string(),
+    // 跨厂商归一键（页面按它把同一逻辑模型的路由聚成一个执行组）。
+    modelKey: z.string().optional(),
+    // `cli` = 外部 CLI harness；缺省 = DSH 原生模型。
+    transport: z.string().optional(),
+    harness: z.string().optional(),
   })),
 });
 

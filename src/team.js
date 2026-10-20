@@ -146,20 +146,38 @@ export function resolveTeam(selection, catalog, fallback = []) {
   return team;
 }
 
+/** 目录条目 → 可调用条目；CLI 条目把 transport/harness 一起带出去。 */
+function resolveEntry(entry, spec) {
+  const resolved = {
+    provider: entry.provider,
+    model: entry.id,
+    name: entry.name,
+    reasoningEffort: spec.reasoningEffort,
+  };
+  if (entry.transport === 'cli') {
+    resolved.transport = 'cli';
+    resolved.harness = entry.harness;
+    resolved.harnessModel = entry.harnessModel;
+    resolved.harnessProvider = entry.harnessProvider;
+    resolved.readOnly = entry.readOnly === true;
+  }
+  return resolved;
+}
+
 /** 在目录里定位一条名单项；`provider` 写了就必须一致。 */
 function matchEntry(spec, catalog) {
   const full = spec.provider ? `${spec.provider}/${spec.model}` : spec.model;
   // ① 整串命中（模型 id 自带 `/` 时走这条）
   const byFull = catalog.find((entry) => entry.id === full);
-  if (byFull) return { provider: byFull.provider, model: byFull.id, name: byFull.name, reasoningEffort: spec.reasoningEffort };
+  if (byFull) return resolveEntry(byFull, spec);
   // ② 按 provider + model 命中
   if (spec.provider) {
     const byPair = catalog.find((entry) => entry.provider === spec.provider && entry.id === spec.model);
-    if (byPair) return { provider: byPair.provider, model: byPair.id, name: byPair.name, reasoningEffort: spec.reasoningEffort };
+    if (byPair) return resolveEntry(byPair, spec);
     return null;
   }
   // ③ 裸 model id
   const byModel = catalog.find((entry) => entry.id === spec.model);
-  if (byModel) return { provider: byModel.provider, model: byModel.id, name: byModel.name, reasoningEffort: spec.reasoningEffort };
+  if (byModel) return resolveEntry(byModel, spec);
   return null;
 }

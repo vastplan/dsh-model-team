@@ -15,8 +15,8 @@ whenToUse: 用户要求在 DeepSeek Harness（本机 DSH）里做多模型审计
 
 ## 硬规则
 
-1. **不要运行 `node dist/cli.js`**，也不要手写任何外部模型 CLI 的 argv。旧技能那一套在 DSH 里不再使用。
-2. **模型名单 = DSH 已注册路由**（`ctx.llm.listProviders()` / `listModels()`）。想让某家可用，先在 DSH 设置里给它配 provider 路由。
+1. **不要手动运行外部模型 CLI**（也不要手写 argv 复制粘贴）。要接 CLI，就在插件配置的 `harnesses` 里按协议定义，让插件统一执行。
+2. **模型名单 = DSH 已注册路由 ∪ `cliModels` 里的 CLI 模型**。DSH 模型先在设置里配 provider 路由；CLI 模型用 `cliModels` 挂进来（合成 provider `cli-<harness>`）。
 3. **不要手起 subagent 冒充某家模型**：`mode=subagent` 由插件按候选的 provider/model 派活，才是「这家在干活」；自己 spawn 的 subagent 默认继承父模型。
 4. **每场必须有收尾**：读完各家 `answer` 后逐条对照代码判定成立/不成立/可选，再给用户结论；禁止只把模型正文复述一遍就收工。
 
@@ -26,10 +26,10 @@ whenToUse: 用户要求在 DeepSeek Harness（本机 DSH）里做多模型审计
 model_team(
   packet: "<Task Packet，1–3K token>",
   kind: "audit" | "design" | "reason",   // 默认 audit
-  models: ["provider/model", "provider/model@@effort"],  // 省略 = 按这类活动绑定的执行组跑
-  mode: "llm" | "subagent",              // 默认 llm；要读代码就用 subagent
+  models: ["provider/model", "provider/model@@effort", "cli-pi/k3@@max"],  // 省略 = 按这类活动绑定的执行组跑
+  mode: "llm" | "subagent",              // 默认 llm；要读代码就用 subagent；CLI 条目忽略此参数
   files: ["src/a.js", "src/b.js"],       // 本次涉及的文件；相对路径要配 workspace
-  workspace: "/abs/path/to/repo",        // files 的解析基准
+  workspace: "/abs/path/to/repo",        // files 的解析基准；CLI 条目的 cwd（必填）
   max_depth: 1,                          // 仅 mode=subagent：子代理的分包深度
 )
 ```
@@ -39,8 +39,25 @@ model_team(
 - `kind=reason` 专责推理：结论、步骤、风险、非目标；不要改写成多个方向。
 - `mode=llm`：每家一次纯推理调用（`ctx.llm.stream`），**看不到仓库**；`files` 的正文会带行号拼进提示词，适合只审几份文件。
 - `mode=subagent`：每家起一个能读仓库的子 Agent；`files` 只给**清单**（正文让它自己读），审计要顺着 import 追代码时用它。
+- **CLI 条目**（`cli-pi/k3` 这类）不看 `mode`：它按 harness 定义自己的工具能力与只读纪律执行，`files` 同样只给清单。
 
 **点名 = 接管同款，不取消绑定**：`models` 里只要命中某个执行组的任一候选，该组就**整组改走点名的那条路由**（主备链只留它）；没被命中的绑定组照常参与；点名里绑定没有的模型作为独立条目追加。想只跑点名的那几家，先到设置里清空/收窄绑定。点名的模型必须能解析，否则**响亮报错并列出可用项**。
+
+## CLI harness（可选）
+
+插件内置 `pi` / `opencode` 的无头模式定义；其它 CLI 在 `cordis.patch.yml` 的 `harnesses` 里按协议追加，
+再用 `cliModels` 把模型挂进目录（合成 provider `cli-<harness>`）：
+
+```yaml
+cliModels:
+  - { id: k3, tool: pi, provider: magpie, model: group/auto-kimi-k3, name: Kimi K3, modelKey: kimi-k3 }
+```
+
+- 点名/编组写 `cli-pi/k3@@max`；`modelKey` 与 DSH 路由一致时可在同一执行组里主备回落。
+- CLI 条目必须有绝对 `workspace`（cwd）；`files` 只给清单，CLI 自己读。
+- 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task；
+  凭证由各 CLI 自己的登录态管理，插件不存密钥。
+- 字段、占位符、argv 顺序、错误/取消语义见 `docs/harness-protocol.md`。
 
 ## Task Packet 写法
 
@@ -69,7 +86,7 @@ model_team(
 
 ## 结果与账本
 
-- 返回 `models[]`：每家一行（`model` / `provider` / `name` / `reasoningEffort` / `status` / `seconds` / `usage` / `text` / `error` / `tried` / `logPath`）。
+- 返回 `models[]`：每家一行（`model` / `provider` / `name` / `reasoningEffort` / `tool` / `status` / `seconds` / `usage` / `text` / `error` / `tried` / `logPath`）。
 - `status`：`done` 有结果 / `no-result` 空正文 / `failed` 抛错 / `stopped` 被用户停止或整场取消。
 - **先看总开关**：设置 → 多模型团队 → 「保存数据」打开时才写账本与会话日志；关着时「用完即走」，周报与报告会明确报「开关是关的」。
 - 打开后每次调用自动落账本：`$DSH_HOME/model-team/ledger.db`（`runs` / `calls` / `call_metric` / `reports`），
@@ -105,7 +122,9 @@ model_team_weekly(days: 7, model: "provider/model")   // model 省略 = 设置�
 2. 执行组里**失败的前几跳**只出现在 `tried` 里，不进账本/周报（账本只记最终生效的那一条）。
 3. 单家「停止」按 job id 定位场次（Host 内部有 job id → runId 别名表）；点完要等这一家被 abort、结算成 `stopped`。
 4. `mode=llm` 下发起了工具调用的回答一律算失败（模型没按「不调工具」的约束作答）。
-5. 外部 CLI 技能的账本在 `~/.model-team/`，插件账本在 `$DSH_HOME/model-team/`，**两本账不混**。
+5. CLI harness 的 token 用量取决于该 CLI 的事件流；拿不到时记 0、报告显示 `—`。
+   CLI 未安装/未登录会在该行失败，并带上 stderr 尾部；凭证由 CLI 自己的登录态管理。
+6. 外部 CLI 技能的账本在 `~/.model-team/`，插件账本在 `$DSH_HOME/model-team/`，**两本账不混**。
 
 ## 自检
 

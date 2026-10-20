@@ -120,8 +120,8 @@ export function writeSessionLog(dir, call) {
     tool: call.tool ?? 'dsh',
     model: call.model,
     thinking: call.reasoningEffort ?? '',
-    exit_code: call.status === 'failed' ? 1 : 0,
-    stop_note: call.status === 'failed' ? (call.error ?? '') : '',
+    exit_code: call.exitCode ?? (call.status === 'failed' ? 1 : 0),
+    stop_note: call.stopNote ?? (call.status === 'failed' ? (call.error ?? '') : ''),
     usage: {
       input: call.usage?.input ?? 0,
       output: call.usage?.output ?? 0,
@@ -132,8 +132,14 @@ export function writeSessionLog(dir, call) {
     cost: null,
     answer: call.text ?? '',
     messages: call.messages ?? [],
-    unmapped: [],
-    markers: { provider: call.provider, reasoning_effort: call.reasoningEffort ?? '', status: call.status },
+    // CLI 流里没认出的事件类型：留痕，便于发现解析口径漂移（DSH 调用面恒为空）。
+    unmapped: Array.isArray(call.unmapped) ? call.unmapped : [],
+    markers: {
+      provider: call.provider,
+      tool: call.tool ?? 'dsh',
+      reasoning_effort: call.reasoningEffort ?? '',
+      status: call.status,
+    },
   };
   writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
   return path;

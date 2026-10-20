@@ -1,6 +1,6 @@
 {
   "name": "@vastplan/model-team",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "多模型团队：用 DSH 的 LLM 服务并发调用各已注册模型，做事后审计、设计分叉与专责推理；带账本、周报与插件页面。",
   "license": "MIT",
@@ -17,9 +17,10 @@
     "index.js",
     "typert.js",
     "client.js",
-    "src/*.js",
+    "src/**/*.js",
     "assets/*.md",
     "docs/images/*.webp",
+    "docs/*.md",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg"

@@ -1,17 +1,19 @@
 /**
  * 多模型团队（Host 半）。
  *
- * 调用面只有一条：DSH 自己的 `ctx.llm`（纯推理并发）与 `ctx.subagents`（需要读仓库的子 Agent）。
- * 本插件不认识任何外部 CLI，也不回读模型的会话文件——可用模型一律来自
- * `ctx.llm.listProviders()` / `listModels()`，与 DSH 设置里的路由一致。
+ * 调用面有两条：
+ * - DSH 原生：`ctx.llm`（纯推理）与 `ctx.subagents`（读仓库的子 Agent）；
+ * - CLI harness：pi / opencode 等外部 CLI 的无头模式，按 `src/harness/` 的协议定义接入。
  *
- * 进度面：`ctx.jobs`（每次 run 一个 job，逐模型一行）。
+ * 可用模型 = DSH 已注册模型 ∪ `cliModels` 里声明的 CLI 模型。
+ * 进度面仍是 `ctx.jobs`（每次 run 一个 job，逐模型一行），两条调用面共用。
+ *
  * 账本面：`node:sqlite`（甲方案：独立库文件，不经过 storageDomain 的全量载入）。
  * 读取面：`TYPERT` 描述符（A1：Client 通过 `ctx.remote.modelTeam` 读账本与周报）。
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
@@ -21,6 +23,9 @@ import { callKeyOf, defaultLedgerPath, openLedger, packetHash } from './src/ledg
 import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
+import {
+  cliCatalogEntries, harnessFor, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
+} from './src/harness/index.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
   candidatesOf, openConfig, readBinding, readBindings, readGroups, readPrefs,
@@ -126,8 +131,8 @@ export function modelKeyOf(provider, id, name) {
   return stripped.replace(/[-_.]/g, '-').replace(/-+/g, '-');
 }
 
-/** 枚举 DSH 当前可调用的全部模型。 */
-async function listCatalog(ctx) {
+/** 枚举 DSH 当前可调用的全部模型（DSH 原生 + `cliModels` 声明的 CLI 模型）。 */
+async function listCatalog(ctx, config = {}) {
   const catalog = [];
   for (const provider of ctx.llm.listProviders()) {
     let models = [];
@@ -160,6 +165,8 @@ async function listCatalog(ctx) {
       });
     }
   }
+  // CLI harness 模型：合成 provider（cli-pi / cli-opencode），条目自带 transport/harness。
+  catalog.push(...cliCatalogEntries(config, ctx.logger));
   return catalog;
 }
 
@@ -259,6 +266,9 @@ async function callLlm(ctx, entry, options, signal) {
   if (failure) {
     const error = new Error(failure);
     error.messages = messages;
+    // 只把**助手正文**作为部分结果：`messages` 里还有用户 prompt，
+    // 让 catch 去 flatMap 全部 text block 会把 prompt 当成模型输出。
+    error.partialText = text;
     // **把已采到的 usage 挂在 error 上**：宿主 adapter 在流中途报错/取消时，
     // 会先 yield `usage` 再 yield `finish(error)`（dsh-llm-pi-ai 的 mapUsage 顺序），
     // 所以这里通常已经拿到用量。早先抛错时把它丢了，失败行的 token 记成 0，
@@ -379,6 +389,35 @@ async function callSubagent(ctx, subagents, entry, options, signal, parentAgent)
     try { unsubscribe?.(); } catch { /* 已释放 */ }
     await activation.dispose();
   }
+}
+
+/**
+ * 一次 CLI harness 调用：把条目翻译成协议定义能吃的输入，交给 `runHarness`。
+ *
+ * CLI 的 `cwd` 必须是绝对 workspace（Host 进程的 cwd 不是项目目录）；
+ * 取消、超时、看门狗、进度都由 `runHarness` 统一处理，返回形状与 `callLlm` 对齐。
+ */
+async function callCli(ctx, entry, options, signal) {
+  const definition = harnessFor(entry.harness);
+  const workspace = String(options.workspace ?? '').trim();
+  if (!workspace || !isAbsolute(workspace)) {
+    throw new Error(
+      `CLI 条目「${entry.name}」需要绝对 workspace（作为 CLI 的 cwd）：${workspace || '(未给)'}；`
+      + '请在 model_team 里传 workspace=<项目绝对路径>',
+    );
+  }
+  return await runHarness({
+    ctx,
+    def: definition,
+    entry,
+    prompt: options.prompt,
+    workspace,
+    tmpDir: options.tmpDir,
+    signal,
+    onPhase: options.onPhase,
+    timeoutMs: options.timeoutMs,
+    silenceMs: options.silenceMs,
+  });
 }
 
 const STATUS_LABEL = { queued: '排队', running: '运行', done: '完成', 'no-result': '无结果', failed: '失败', stopped: '已停止' };
@@ -540,14 +579,14 @@ const statusLine = (row) =>
   + `${row.error ? ` · ${row.error.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
 
 /** 一场执行：并发调用、逐行推进度、返回结构化结果。 */
-async function runTeam(ctx, handle, args, config, configStore, signal, parentAgent) {
+export async function runTeam(ctx, handle, args, config, configStore, signal, parentAgent) {
   const kind = args.kind ?? 'audit';
   const meta = KINDS[kind];
   if (!meta) throw new Error('kind 只接受 audit、design 或 reason');
   const packet = String(args.packet ?? '').trim();
   if (!packet) throw new Error('packet 为空');
 
-  const catalog = await listCatalog(ctx);
+  const catalog = await listCatalog(ctx, config);
   if (!catalog.length) throw new Error('DSH 里没有已注册的 LLM provider 或 provider 未列出模型，请先在设置里配置模型');
   const viaSubagent = args.mode === 'subagent';
   if (viaSubagent && !ctx.get('subagents')) throw new Error('mode=subagent 需要 subagents 服务');
@@ -624,7 +663,9 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
   const claimed = new Map(); // groupId -> 接管它的点名条目
   for (const group of pickedGroups) {
     for (const raw of candidatesOf(group)) {
-      const entry = resolveTeam([raw], catalog, [])[0];
+      // 失效候选（路由改名/下线）在这里也要跳过：点名匹配不值得为一条旧路由抛错。
+      let entry = null;
+      try { entry = resolveTeam([raw], catalog, [])[0]; } catch { continue; }
       if (!entry) continue;
       const hit = claimOf.get(askKey(entry));
       if (hit) { claimed.set(group.groupId, hit); break; }
@@ -637,9 +678,27 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
     // 与用户意图正好相反（真机：点名 devin/kimi-k3，账本里跑的却是 group/auto-kimi-k3）。
     const takeover = claimed.get(group.groupId);
     if (takeover) return { group, candidates: [takeover] };
-    const candidates = candidatesOf(group)
-      .map((entry) => resolveTeam([entry], catalog, [])[0])
-      .filter(Boolean);
+    // 逐候选解析：**失效的候选跳过，不拖垮同组其它候选**。
+    // 路由改名（`group/auto-*` → `auto/*`）时，旧候选会解析失败；
+    // 以前一条失败就 `resolveTeam` 抛错、整场无法开跑，现在改用同组的备选继续。
+    const candidates = [];
+    const unknown = [];
+    for (const raw of candidatesOf(group)) {
+      try {
+        const [resolved] = resolveTeam([raw], catalog, []);
+        if (resolved) candidates.push(resolved);
+      } catch {
+        unknown.push(raw);
+      }
+    }
+    if (unknown.length) {
+      ctx.logger?.warn?.(
+        `model-team: 执行组「${group.name}」的候选不在 DSH 已注册路由里，已跳过：${unknown.join(', ')}`,
+      );
+    }
+    if (!candidates.length) {
+      ctx.logger?.warn?.(`model-team: 执行组「${group.name}」没有可用候选，本场跳过`);
+    }
     return { group, candidates };
   }).filter((plan) => plan.candidates.length);
 
@@ -657,35 +716,47 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
   }
 
   if (!team.length && !groupPlans.length) {
-    throw new Error('没有可执行的模型：既没有名单项，也没有启用的执行组');
+    throw new Error('没有可执行的模型：既没有名单项，也没有可用的执行组（候选可能已不在 DSH 路由里，请在设置里更新）');
   }
 
-  // 开场提示词按模式选：subagent 模式要鼓励模型读仓库，llm 模式要禁止它调工具。
+  // 开场提示词按调用面选：CLI / subagent 要鼓励模型读仓库，llm 要禁止它调工具。
   // 没有专门写 `subagentPreamble` 的活动（design / reason）沿用 llm 版。
-  const preamble = (viaSubagent && meta.subagentPreamble) || meta.preamble;
 
-  // `files` 在两种模式下都生效，但**给的东西不同**：
+  // 本次参与的所有条目（列表项 + 每个组的候选）：决定要不要准备 CLI 用的清单。
+  const candidateEntries = [...team, ...groupPlans.flatMap((plan) => plan.candidates)];
+  const hasCli = candidateEntries.some((entry) => entry.transport === 'cli');
+  const workspace = String(args.workspace ?? '').trim();
+
+  // `files` 在三种调用面上都生效，但**给的东西不同**：
   //
   // - `llm`：模型看不到仓库，所以附**正文**（带行号）——这是它唯一的代码来源。
-  // - `subagent`：子代理有 read/grep/glob，能自己打开文件，附正文只会重复占 token
-  //   （而且那是调用时刻的快照，可能与磁盘不一致）。它需要的是**范围**：
+  // - `subagent` / `cli`：自己有 read/grep/glob 或等价工具，能自己打开文件；
+  //   附正文只会重复占 token（而且可能与磁盘不一致）。它们需要的是**范围**：
   //   「这次审计涉及这些文件」。所以只给清单，正文让它自己读。
-  let attachment = { appendix: '', files: [], missing: [] };
+  let attachmentLlm = { appendix: '', files: [], missing: [] };
+  let attachmentList = { appendix: '', files: [], missing: [] };
+  // 只有真的存在 DSH llm 条目时才需要读正文（纯 CLI 场次不该因为目录文件被误判成「读不到」）。
+  const hasDshLlm = !viaSubagent && candidateEntries.some((entry) => entry.transport !== 'cli');
   if (Array.isArray(args.files) && args.files.length) {
     // **有读不到的文件就直接失败**，不要静默跳过。
     // 踩过：Host 进程的 cwd 不是项目目录，相对路径全解析成「不存在」，
     // 附件为空却照常开跑，模型回一句「没看到附件」——调用方完全看不出是路径错了。
-    attachment = viaSubagent
-      ? listAttachments(args.files, args.workspace)
-      : readAttachments(args.files, args.workspace);
-    if (attachment.missing.length) {
+    if (viaSubagent || hasCli) attachmentList = listAttachments(args.files, args.workspace);
+    if (hasDshLlm) attachmentLlm = readAttachments(args.files, args.workspace);
+    const missing = [...new Set([...attachmentLlm.missing, ...attachmentList.missing])];
+    if (missing.length) {
       throw new Error(
-        `这些文件读不到：${attachment.missing.join(', ')}`
+        `这些文件读不到：${missing.join(', ')}`
         + `（workspace=${args.workspace ?? '(未给)'}）；files 用绝对路径或显式传 workspace`,
       );
     }
   }
-  const prompt = `${preamble}${packet}\n${attachment.appendix}`;
+  const promptLlm = `${meta.preamble}${packet}\n${attachmentLlm.appendix}`;
+  // subagent 与 CLI 都要「先自己读代码」：有 subagentPreamble 就用它，别再套 llm 的「禁止调工具」。
+  const promptTools = `${meta.subagentPreamble || meta.preamble}${packet}\n${attachmentList.appendix}`;
+  /** CLI 条目与 subagent 一样拿「范围清单」；DSH llm 条目拿正文。 */
+  const promptFor = (entry) => (entry.transport === 'cli' || viaSubagent ? promptTools : promptLlm);
+  const attachedFiles = [...new Set([...attachmentLlm.files, ...attachmentList.files])];
 
   // **总开关**：只有打开「保存数据」才落会话日志与账本。
   //
@@ -851,22 +922,46 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
 
     try {
       const options = {
-        prompt, maxDepth: args.max_depth, onPhase,
-        // 诊断用：统计订阅层实际收到多少帧（0 = 事件被 scope 挡住，非 0 = 过滤条件写错）。
+        prompt: promptFor(entry),
+        workspace,
+        tmpDir: runDir ?? join(tmpdir(), 'model-team'),
+        timeoutMs: attemptTimeoutMs,
+        silenceMs,
+        maxDepth: args.max_depth,
+        onPhase,
       };
-      const result = viaSubagent
-        ? await callSubagent(ctx, ctx.get('subagents'), entry, options, callSignal, parentAgent)
-        : await callLlm(ctx, entry, options, callSignal);
+      const result = entry.transport === 'cli'
+        ? await callCli(ctx, entry, options, callSignal)
+        : viaSubagent
+          ? await callSubagent(ctx, ctx.get('subagents'), entry, options, callSignal, parentAgent)
+          : await callLlm(ctx, entry, options, callSignal);
       row.text = result.text;
       row.reasoning = result.reasoning;
       row.usage = result.usage;
       row.messages = result.messages ?? [];
-      row.status = row.text.trim() ? 'done' : 'no-result';
+      if (result.exitCode !== undefined) row.exitCode = result.exitCode;
+      if (result.stopNote) row.stopNote = result.stopNote;
+      if (Array.isArray(result.unmapped) && result.unmapped.length) row.unmapped = result.unmapped;
+      if (entry.transport === 'cli' && result.exitCode !== 0) {
+        row.status = 'failed';
+        row.error = result.stopNote || `CLI 退出码 ${result.exitCode}`;
+      } else {
+        row.status = row.text.trim() ? 'done' : 'no-result';
+      }
     } catch (error) {
       // 用户点「停止」导致的取消不是模型失败：单独标成 stopped，别记进失败率。
+      // 超时/无输出优先于「被取消」：定时器先置 `stopNote` 再 abort，
+      // 若先判 signal.aborted 会把超时误记成「主动取消」。
+      const timeoutNote = error?.stopNote === '超时' || error?.stopNote === '无输出超时'
+        ? error.stopNote
+        : (stopNote || '');
       if (stoppedByUser.value) {
         row.status = 'stopped';
         row.error = '已手动停止';
+      } else if (timeoutNote) {
+        row.status = 'failed';
+        row.error = timeoutNote;
+        row.stopNote = timeoutNote;
       } else if (signal?.aborted) {
         // 整场被取消（job 被 kill、工具调用被 abort）：也不是模型不可用。
         row.status = 'stopped';
@@ -877,13 +972,16 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
       // 失败也可能已经烧了 token：adapter 在报错/取消前会先发 usage，
       // `callLlm` 把它挂在 error 上，这里接回来，别让失败行在账本里记成 0。
       if (error?.usage) row.usage = error.usage;
-      // 失败时保留已经流出来的正文（截断的 `max-tokens` 尤其需要），
+      // 失败时保留已经流出来的正文（截断的 `max-tokens`、CLI 半截输出尤其需要），
       // 否则会话日志里只剩一句错误，看不出模型当时说到哪儿。
-      const partial = (error?.messages ?? [])
-        .flatMap((message) => (Array.isArray(message?.content) ? message.content : []))
-        .filter((block) => block?.type === 'text')
-        .map((block) => block.text)
-        .join('');
+      // **只取助手消息**：`messages` 里还有用户 prompt，全量 flatMap 会把 prompt 当成输出。
+      const partial = error?.partialText
+        || (error?.messages ?? [])
+          .filter((message) => message?.role === 'assistant')
+          .flatMap((message) => (Array.isArray(message?.content) ? message.content : []))
+          .filter((block) => block?.type === 'text')
+          .map((block) => block.text)
+          .join('');
       if (partial) row.text = partial;
       // 已被用户停止的保持 `stopped`，不要被这里覆盖回 `failed`。
       if (row.status !== 'stopped') row.status = 'failed';
@@ -908,7 +1006,9 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
     // 结算后阶段与状态同义，尾巴保留最后一小段正文（进度窗据此显示「说到哪儿了」）。
     row.phase = row.status;
     row.tail = row.text || row.tail || '';
-    row.tool = viaSubagent ? 'dsh-subagent' : 'dsh-llm';
+    row.tool = entry.transport === 'cli'
+      ? entry.harness
+      : viaSubagent ? 'dsh-subagent' : 'dsh-llm';
     // 会话日志与调度留痕：正文、思考、消息、用量全落，便于备查。
     if (runDir) {
       try {
@@ -919,6 +1019,9 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
           started: startedStamp, finished: localStamp(new Date(ended)), durationS: row.seconds,
           hop: `${row.provider}-${row.tool}`,
           groupId: row.groupId ?? '',
+          exitCode: row.exitCode,
+          stopNote: row.stopNote,
+          unmapped: row.unmapped,
         });
         writeBalanceLog(runDir, {
           model: row.model, provider: row.provider,
@@ -1062,8 +1165,8 @@ async function runTeam(ctx, handle, args, config, configStore, signal, parentAge
     started_at: startedAt,
     finished_at: Date.now(),
     // 这次 llm 模式实际附上了哪些文件（subagent 模式恒为空）：便于事后对账「模型到底看到了什么」。
-    attached: attachment.files,
-    missingFiles: attachment.missing,
+    attached: attachedFiles,
+    missingFiles: [],
     // 因为点名而被跳过的执行组数量（0 = 本次就是按配置跑的）。
     skippedGroups,
     models: rows,
@@ -1110,7 +1213,7 @@ async function buildWeekly(ctx, ledger, config, options, signal) {
     // `listCatalog` 与 `resolveTeam` 都在 try 内：模型配错（下线/改名）时应当
     // 落一条 `summaryError`，而不是让整个周报连已算好的聚合一起丢掉。
     try {
-      const catalog = await listCatalog(ctx);
+      const catalog = await listCatalog(ctx, config);
       const [entry] = resolveTeam([summaryModel], catalog, []);
       const asked = `${WEEKLY_PREAMBLE}${factsForModel(facts)}\n`;
       const result = await callLlm(ctx, entry, { prompt: asked }, signal);
@@ -1158,6 +1261,32 @@ export const Config = z.object({
 
   /** 会话日志根；缺席时取 `$DSH_HOME/model-team/runs`（与技能侧 `runs/` 同规则）。 */
   runsRoot: z.string().default(''),
+
+  /**
+   * 额外的 CLI harness 定义（协议见 `docs/harness-protocol.md`）。
+   *
+   * 内置 `pi` / `opencode`，这里可覆盖它们或新增其它 CLI；每份定义是纯数据：
+   * `id / command / args / model / thinking / prompt / output / usage / capabilities`。
+   */
+  harnesses: z.array(z.any()).default([]),
+
+  /**
+   * CLI 模型目录：`tool` 必须是已登记的 harness id。
+   *
+   * 条目会以合成 provider `cli-<tool>` 出现在模型目录里，例如：
+   * `{ id: 'k3', tool: 'pi', provider: 'magpie', model: 'group/auto-kimi-k3',
+   *    modelKey: 'kimi-k3', name: 'Kimi K3' }` → 可用 `cli-pi/k3@@max` 点名/编组。
+   */
+  cliModels: z.array(z.object({
+    id: z.string(),
+    tool: z.string(),
+    provider: z.string().default(''),
+    model: z.string(),
+    name: z.string().default(''),
+    modelKey: z.string().default(''),
+    efforts: z.array(z.string()).default([]),
+    defaultEffort: z.string().default(''),
+  })).default([]),
 });
 
 /** Host 服务：Client 通过 `ctx.remote.modelTeam` 读账本与周报（A1）。 */
@@ -1203,7 +1332,7 @@ export class ModelTeamService extends TypertRemoteService {
 
   /** 可选的模型目录（页面下拉框用）。 */
   async catalog() {
-    const models = await listCatalog(this.ctx);
+    const models = await listCatalog(this.ctx, this.pluginConfig ?? {});
     return { models };
   }
 
@@ -1212,7 +1341,7 @@ export class ModelTeamService extends TypertRemoteService {
     const raw = String(spec ?? '').trim();
     let catalog = [];
     try {
-      catalog = await listCatalog(this.ctx);
+      catalog = await listCatalog(this.ctx, this.pluginConfig ?? {});
     } catch {
       catalog = [];
     }
@@ -1237,7 +1366,7 @@ export class ModelTeamService extends TypertRemoteService {
 
     // 校验思考强度：模型不支持该档时不能存进去，否则每次调用都会被 provider 拒绝
     // （真机踩过：Kimi K3 在 magpie 下没有 reasoningEfforts，却存了 @high）。
-    const catalog = await listCatalog(this.ctx);
+    const catalog = await listCatalog(this.ctx, this.pluginConfig ?? {});
     const problems = [];
     for (const candidate of candidates) {
       if (!candidate.reasoningEffort) continue;
@@ -1519,14 +1648,20 @@ export function apply(ctx, config = {}) {
   // 用 bundled rank（最低优先级）：项目/用户目录里的同名技能会压过它。
   registerBundledSkill(ctx);
 
+  // CLI harness：内置 pi / opencode + 配置里的定义（后者可覆盖前者）。
+  // 注册只做校验与登记，不起进程；真正调用在 runCandidate 的 `transport === 'cli'` 分支。
+  registerBuiltinHarnesses();
+  registerConfiguredHarnesses(ctx, config);
+
   ctx.tools.register({
     name: config.toolName ?? 'model_team',
     description:
       'Multi-model team: run a post-audit, a design fork (2–4 options, no decision), or focused reasoning across the '
-      + 'models configured for this plugin (or every model DSH has registered). Each model gets one independent call and '
+      + 'models configured for this plugin (or every model DSH has registered), plus CLI harness models declared in '
+      + '`cliModels` (e.g. `cli-pi/k3`). Each model gets one independent call and '
       + 'one progress row; the same model may appear twice at different reasoning efforts. Runs are recorded in a ledger. '
       + 'Default mode="llm" is a pure inference call; mode="subagent" runs each model as a subagent that can read the '
-      + 'workspace. It never edits the repository itself.',
+      + 'workspace; CLI entries ignore mode and run their harness headlessly. It never edits the repository itself.',
     parameters: {
       type: 'object',
       properties: {
@@ -1543,7 +1678,8 @@ export function apply(ctx, config = {}) {
         models: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional picks as `provider/model` or `provider/model@@effort` (double `@` separates the effort). '
+          description: 'Optional picks as `provider/model` or `provider/model@@effort` (double `@` separates the effort); '
+            + 'CLI harness models are `cli-<harness>/<id>` (e.g. `cli-pi/k3@@max`). '
             + 'A pick REPLACES the configured entry for the SAME model at the SAME effort (so you can swap which provider '
             + 'route runs it); it does NOT drop the activity bindings, and models absent from the bindings are added as '
             + 'extra entries. Omit to run exactly what the bindings select.',
@@ -1551,7 +1687,7 @@ export function apply(ctx, config = {}) {
         mode: {
           type: 'string',
           enum: ['llm', 'subagent'],
-          description: 'llm = one pure inference call per model (default). subagent = each model runs as a subagent that can read the workspace.',
+          description: 'llm = one pure inference call per model (default). subagent = each model runs as a subagent that can read the workspace. CLI entries ignore this and run their harness headlessly.',
           default: 'llm',
         },
         max_depth: {
@@ -1568,7 +1704,7 @@ export function apply(ctx, config = {}) {
         },
         workspace: {
           type: 'string',
-          description: 'Base directory for relative `files` paths. Defaults to the process working directory.',
+          description: 'Base directory for relative `files` paths; also the cwd for CLI entries (required for them). Defaults to the process working directory only for DSH entries.',
         },
       },
       required: ['packet'],

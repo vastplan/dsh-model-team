@@ -7,6 +7,9 @@
 插件同时注册 `model-team` 技能：安装后 DSH 自动发现它，任务命中多模型审计/分叉/推理时，
 模型会按技能里的口径调用 `model_team`，不需要手动加载，也不用再往 `~/.dsh/skills` 放文件。
 
+除了 DSH 已注册模型，还可以通过 **CLI harness 协议**接入 pi / opencode 等 CLI 的无头模式；
+CLI 模型与 DSH 路由可以混在同一个执行组里做主备回落。
+
 ![执行中的多模型进度窗](docs/images/progress-dock.webp)
 
 ## 它解决什么问题
@@ -17,6 +20,8 @@
 - **执行组带主备**：一个组 = 同一逻辑模型的多个厂商路由，主力失败自动换厂商，而不是整组失败。
 - **结果可复查**：账本、每跳会话 JSON、周报、自包含 HTML 报告，都是本地文件。
 - **进度可见**：逐模型一行，带阶段、耗时与最新输出；运行中可单家「停止」，整场可取消。
+- **CLI harness 可接入**：pi / opencode 等 CLI 按一份协议定义接入（`src/harness/`），
+  和 DSH 路由混排做回落；协议见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 - **技能随插件自动注册**：`model-team` 技能由插件启动时注册，装好就在 DSH 的技能目录里；
   任务命中时模型按技能说明自动调用 `model_team`。开发本仓库时，项目级 `.dsh/skills` 会自动覆盖内置版。
 
@@ -85,10 +90,10 @@ model_team_weekly(days: 7)
 | --- | --- | --- |
 | `packet` | string（必填） | 自包含任务包，1–3K token；被调模型看不到你的会话 |
 | `kind` | `audit` \| `design` \| `reason` | 默认 `audit`；三种活动的开场约束不同 |
-| `models` | string[] | 可选点名：`provider/model` 或 `provider/model@@effort`；省略 = 按绑定执行组跑 |
-| `mode` | `llm` \| `subagent` | 默认 `llm`；要读仓库用 `subagent` |
+| `models` | string[] | 可选点名：`provider/model` 或 `provider/model@@effort`；CLI 模型写 `cli-pi/k3@@max`；省略 = 按绑定执行组跑 |
+| `mode` | `llm` \| `subagent` | 默认 `llm`；要读仓库用 `subagent`；**CLI 条目忽略此参数**（工具能力由 harness 定义声明） |
 | `files` | string[] | 本次涉及的文件（subagent 模式也接受目录）；相对路径要配 `workspace` |
-| `workspace` | string | `files` 的解析基准，必须是绝对路径 |
+| `workspace` | string | `files` 的解析基准，必须是绝对路径；**CLI 条目必填**（作为 CLI 的 cwd） |
 | `max_depth` | integer | 仅 `subagent`：子代理的分包深度 |
 
 语义要点：
@@ -142,6 +147,45 @@ model_team_weekly(days: 7)
         ledgerPath: ''      # 默认 $DSH_HOME/model-team/ledger.db
         runsRoot: ''        # 默认 $DSH_HOME/model-team/runs
 ```
+
+## CLI Harness（可选）
+
+除了 DSH 已注册模型，插件还内置了 `pi` / `opencode` 两家 CLI harness 的定义，
+其余 CLI 可以在配置里按同一协议追加。定义是**纯数据**，不用改执行层。
+
+配置示例（`cordis.patch.yml`）：
+
+```yaml
+- insert:
+    - id: model-team
+      name: '@vastplan/model-team'
+      config:
+        cliModels:
+          - id: k3
+            tool: pi
+            provider: magpie
+            model: group/auto-kimi-k3
+            name: Kimi K3
+            modelKey: kimi-k3
+        # 新增 CLI（可选）：
+        harnesses:
+          - id: foo
+            command: foo
+            args: ["--print", "--output-format", "json"]
+            model: { flag: "--model", format: "{model}" }
+            thinking: { flag: "--thinking", default: high }
+            prompt: { via: argv, separator: "--" }
+            output: { parser: auto }
+```
+
+- 合成 provider 是 `cli-<harness>`：上面的条目得到 `cli-pi/k3`，点名写 `cli-pi/k3@@max`。
+- `modelKey` 与 DSH 路由一致时，页面会把它们聚成同一个执行组，可做
+  `magpie/group/auto-kimi-k3 → cli-pi/k3` 的主备回落。
+- CLI 条目必须有绝对 `workspace`（作为 cwd）；`files` 只附清单，CLI 自己读。
+- 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝
+  edit/write/bash/task；凭证由各 CLI 自己的登录态管理，插件不存密钥。
+- 这些是**静态配置**：改完要重载插件；设置页暂不编辑 CLI 定义。
+- 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 
 ## 数据落盘
 
@@ -199,7 +243,7 @@ model_team_weekly(days: 7)
 - 语法检查：
 
   ```bash
-  for f in index.js client.js typert.js src/*.js; do node --check "$f"; done
+  for f in index.js client.js typert.js src/*.js src/harness/*.js; do node --check "$f"; done
   ```
 
 - Remote 三处清单（Host 标记 / `typert.js` / `client.js`）必须一致，
@@ -211,6 +255,12 @@ model_team_weekly(days: 7)
     client: fs.readFileSync('./client.js','utf8') }))"
   ```
 
+- CLI harness 协议测试（用假 CLI，不需要真实 pi/opencode）：
+
+  ```bash
+  node --test scripts/harness.test.mjs
+  ```
+
 ## 当前限制
 
 - `mode=subagent` 的子代理 **token 用量拿不到**（host 的 `activation.result` 没有 usage），
@@ -220,6 +270,8 @@ model_team_weekly(days: 7)
   设置页里的 `concurrency` 偏好尚未接入执行路径。
 - 报告自动上传会推送整条分支（不是只推报告那一个 commit）；首次使用前先确认仓库状态。
 - 周报与报告依赖「保存数据」总开关；关着时明确报错，不生成空报告。
+- CLI harness 的 token 用量取决于该 CLI 的事件流；拿不到时按未采集记 0（与 subagent 同口径）；
+  CLI 未安装/未登录会在该行失败，并带上 stderr 尾部。
 
 ## 目录结构
 
@@ -239,8 +291,11 @@ model-team/
 │   ├── attach.js         # llm 附正文 / subagent 附清单
 │   ├── skill.js          # 内置技能 provider
 │   ├── buildinfo.js      # Host 半新鲜度自检
-│   └── weekly.js         # 周报提示词与事实文本
-├── docs/images/          # README 截图
+│   ├── weekly.js         # 周报提示词与事实文本
+│   └── harness/          # CLI harness：protocol / defs / exec / parse / catalog
+├── docs/
+│   ├── images/           # README 截图
+│   └── harness-protocol.md
 ├── locale/               # 插件元数据（标题/描述）
 ├── cordis.patch.yml      # bundle 插入行
 └── icon.svg
