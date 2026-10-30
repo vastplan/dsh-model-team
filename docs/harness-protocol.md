@@ -88,7 +88,7 @@ command
 | id | command | 关键 argv（简化） | 只读默认 | 备注 |
 | --- | --- | --- | --- | --- |
 | `agent` | `agent` | `--print --output-format stream-json --mode ask --trust --workspace {workspace} --model {model} <prompt>` | `ask` | 强度写在模型 slug（如 `gemini-3.8-flash-high`） |
-| `claude` | `claude` | `-p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --permission-mode plan --restricted --permission-prompts none --model m --effort e --disallowedTools Edit,Write,MultiEdit,NotebookEdit -- <prompt>` | `plan` + `restricted` | 无 models 命令；发现官方别名 + 当前 `settings.model` |
+| `claude` | `claude` | `-p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --permission-mode plan --restricted --permission-prompts none --model m --effort e --disallowedTools Edit,Write,MultiEdit,NotebookEdit -- <prompt>` | `plan` + `restricted` | 无 models 命令；从二进制读带版本号的最新模型 |
 | `pi` | `pi` | `--print --mode json --no-session [--provider p] --model m --thinking e --exclude-tools edit,write -- <prompt>` | `exclude-tools` | 用量按 `message_end.usage` 逐轮相加 |
 | `zcode` | `node zcode.cjs` | `--prompt <prompt> --cwd {workspace} --mode plan --disallowed-tools "Bash Edit Write"` | `disallowed-tools` | 读改写用户 config，`HOME` 指到临时目录（**hook**） |
 | `opencode` | `opencode` | `run --format json --thinking -m {model}#{thinking} <prompt>` | `OPENCODE_PERMISSION` | 强度拼进 `#variant`；v2 事件无 usage |
@@ -107,7 +107,8 @@ command
 - **grok**：`prompt.via: none`，所以 `{prompt}` 必须出现在 `args` 里。
 - **claude**：Claude Code 2.x；`--restricted` 会去掉 Bash/PowerShell 等执行类工具、把文件工具限制在工作区，
   `--permission-mode plan` 再加一层只读。Claude 没有模型列表命令（`claude models` 会被当成 prompt），
-  自动发现只返回 `sonnet` / `opus` / `haiku` / `fable` 和 `~/.claude/settings.json` 里的 `model`。
+  自动发现从 Claude 二进制提取 `claude-<family>-<version>`，每个家族取最高版本
+  （如 `claude-sonnet-5-5`、`claude-opus-5-5`）；读不到二进制时回退内置版本表。
 
 ### 自动发现来源
 
@@ -116,7 +117,7 @@ command
 | pi | `~/.pi/agent/models.json` 的 `providers[].models[]` |
 | zcode | `~/.zcode/cli/config.json` 的 `builtin:bigmodel-coding-plan` |
 | cline | `~/.cline/data/settings/providers.json` 的当前模型（CLI 无完整列表命令） |
-| claude | `~/.claude/settings.json` 的 `model` + 官方别名（无列表命令） |
+| claude | Claude Code 二进制里的 `claude-<family>-<version>`（每家族最高版本；无列表命令） |
 | opencode | `opencode models` |
 | agent | `agent --list-models` |
 | grok | `grok models` |

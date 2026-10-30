@@ -437,15 +437,17 @@ test('Claude stream-json：assistant/result 正文与用量', () => {
   assert.equal(out.usage.output, 2);
 });
 
-test('Claude 模型发现：官方别名 + 当前配置', async (t) => {
+test('Claude 模型发现：带版本号的最新模型', async (t) => {
   freshRegistry();
   if (!harnessAvailable(harnessFor('claude'))) {
     t.skip('本机没有 claude');
     return;
   }
   const models = await discoverHarness(harnessFor('claude'));
-  assert.ok(models.some((item) => item.modelKey === 'sonnet'));
-  assert.ok(models.some((item) => item.modelKey === 'opus'));
+  const sonnet = models.find((item) => item.modelKey === 'claude-sonnet-5-5');
+  assert.ok(sonnet);
+  assert.match(sonnet.name, /5\.5/);
+  assert.ok(models.some((item) => item.modelKey === 'claude-opus-5-5'));
 });
 
 test('逻辑模型键与路由去重', () => {

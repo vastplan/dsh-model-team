@@ -83,10 +83,10 @@
     "modelKey": "glm-5-2"
   },
   {
-    "id": "sonnet",
+    "id": "claude-sonnet-5-5",
     "tool": "claude",
-    "model": "sonnet",
-    "name": "Claude Sonnet",
-    "modelKey": "sonnet"
+    "model": "claude-sonnet-5-5",
+    "name": "Claude Sonnet 5.5",
+    "modelKey": "claude-sonnet-5-5"
   }
 ]

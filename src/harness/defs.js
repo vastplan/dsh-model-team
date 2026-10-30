@@ -9,9 +9,9 @@
  * 想接新 CLI：优先在 `cordis.patch.yml` 的 `harnesses` 里写定义；确实需要
  * 改配置/环境时再加一个内置定义 + hook。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 /** Cursor agent CLI：思考强度写在模型 slug 里；只读档 `--mode ask`。 */
 export const AGENT_HARNESS = {
@@ -28,6 +28,77 @@ export const AGENT_HARNESS = {
   availability: { fallbacks: ['~/.local/bin/agent'] },
   probe: { args: ['status'], classify: 'exit0' },
 };
+
+/** Claude 二进制解析失败时的兜底：当前最新版本（2026-10）。 */
+const CLAUDE_FALLBACK_MODELS = [
+  { id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+];
+
+let claudeModelCache = null;
+
+/** 找真实的 Claude 可执行文件（`~/.local/bin/claude` 通常是指向版本目录的软链）。 */
+function claudeBinaryPath() {
+  const candidates = [
+    ...String(process.env.PATH ?? '').split(delimiter).filter(Boolean).map((dir) => join(dir, 'claude')),
+    join(homedir(), '.local', 'bin', 'claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+  ];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try { return realpathSync(candidate); } catch { return candidate; }
+  }
+  return '';
+}
+
+/**
+ * Claude CLI 没有模型列表命令，但二进制里带着 `claude-sonnet-5-5` 这类真实模型名。
+ *
+ * 读一次二进制，按家族取**最高版本**（排除 `20250929` 这种 8 位日期段），
+ * 这样目录里显示的是带版本号的 id，而不是 `sonnet` / `opus` 别名。
+ * 读不到二进制时回退到内置版本表。
+ */
+function claudeModels() {
+  if (claudeModelCache) return claudeModelCache;
+  const bin = claudeBinaryPath();
+  if (bin) {
+    try {
+      const text = readFileSync(bin, 'latin1');
+      const pattern = /claude-(sonnet|opus|haiku|fable)-(\d+(?:-\d{1,2})*)/g;
+      const best = new Map();
+      const compare = (left, right) => {
+        for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+          const a = left[index] ?? 0;
+          const b = right[index] ?? 0;
+          if (a !== b) return a - b;
+        }
+        return 0;
+      };
+      for (const match of text.matchAll(pattern)) {
+        const parts = match[2].split('-').map(Number);
+        if (parts.some((value) => value > 99)) continue;
+        const current = best.get(match[1]);
+        if (!current || compare(parts, current.parts) > 0) {
+          best.set(match[1], { parts, version: match[2] });
+        }
+      }
+      if (best.size) {
+        claudeModelCache = [...best.entries()]
+          .map(([family, item]) => ({
+            id: `claude-${family}-${item.version}`,
+            name: `Claude ${family[0].toUpperCase()}${family.slice(1)} ${item.parts.join('.')}`,
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id));
+        return claudeModelCache;
+      }
+    } catch { /* 二进制不可读就走兜底 */ }
+  }
+  claudeModelCache = [...CLAUDE_FALLBACK_MODELS];
+  return claudeModelCache;
+}
 
 /**
  * Claude Code CLI：`-p` 非交互 + `stream-json`，`--include-partial-messages` 出增量。
@@ -57,24 +128,7 @@ export const CLAUDE_HARNESS = {
   availability: { fallbacks: ['~/.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'] },
   probe: { args: ['--version'], classify: 'exit0' },
   hooks: {
-    discover() {
-      const models = [
-        { id: 'sonnet', name: 'Claude Sonnet' },
-        { id: 'opus', name: 'Claude Opus' },
-        { id: 'haiku', name: 'Claude Haiku' },
-        { id: 'fable', name: 'Claude Fable' },
-      ];
-      const file = join(homedir(), '.claude', 'settings.json');
-      if (existsSync(file)) {
-        try {
-          const model = JSON.parse(readFileSync(file, 'utf8')).model;
-          if (typeof model === 'string' && model.trim()) {
-            models.push({ id: model.trim(), name: model.trim() });
-          }
-        } catch { /* 配置坏掉不影响别名发现 */ }
-      }
-      return models;
-    },
+    discover: () => claudeModels(),
   },
 };
 
