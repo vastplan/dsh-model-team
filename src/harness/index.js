@@ -7,10 +7,11 @@
  *   listCatalog() 里追加 cliCatalogEntries(config, ctx.logger)；
  *   runCandidate() 里对 `entry.transport === 'cli'` 调 runHarness(...)。
  */
-import { BUILTIN_HARNESSES } from './defs.js';
+import { BUILTIN_HARNESSES } from './defs.js?v=0.6.2';
 import { registerHarness } from './protocol.js';
 
 export { cliCatalogEntries } from './catalog.js';
+export { clearDiscoveryCache } from './discover.js';
 export { runHarness } from './exec.js';
 export {
   buildLaunch, clearHarnesses, fill, harnessFor, listHarnesses, registerHarness,

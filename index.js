@@ -24,8 +24,8 @@ import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
-  cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
-} from './src/harness/index.js';
+  clearDiscoveryCache, cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
+} from './src/harness/index.js?v=0.6.2';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
@@ -1725,6 +1725,8 @@ export function apply(ctx, config = {}) {
   // 注册只做校验与登记，不起进程；真正调用在 runCandidate 的 `transport === 'cli'` 分支。
   registerBuiltinHarnesses();
   registerConfiguredHarnesses(ctx, config);
+  // 插件重载时清掉自动发现缓存：否则旧的别名（sonnet/opus）会跨重载存活。
+  try { clearDiscoveryCache(); } catch { /* 老版本没有该导出时忽略 */ }
 
   ctx.tools.register({
     name: config.toolName ?? 'model_team',
