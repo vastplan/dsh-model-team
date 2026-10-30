@@ -25,7 +25,7 @@ import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
   clearDiscoveryCache, cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
-} from './src/harness/index.js?v=0.6.8';
+} from './src/harness/index.js?v=0.6.9';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
@@ -1605,7 +1605,18 @@ export class ModelTeamService extends TypertRemoteService {
      * 进度行 id 由 `teamProgressLine` 生成：`model@@effort@groupId`。
      * Client 的 `id` 可能只带模型（列表项），这里做一次前缀匹配兜底。
      */
-    const table = ACTIVE_RUNS.get(runId);
+    let table = ACTIVE_RUNS.get(runId);
+    // 兜底：job id / runId 别名缺失（或旧任务残留）时，按进度行 id 在所有活跃场次里找。
+    // 这能避免用户看到「点了停止没反应」——只要那条进度确实在跑，就能找到它的 AbortController。
+    if (!table && id) {
+      for (const [key, candidate] of ACTIVE_RUNS) {
+        if (candidate.has(id) || [...candidate.keys()].some((item) => item.startsWith(`${id}@`))) {
+          table = candidate;
+          runId = key;
+          break;
+        }
+      }
+    }
     if (!table) return { stopped: false, reason: `场次 ${asked || '(空)'} 不在运行中` };
     const exact = table.get(id);
     const hit = exact ?? [...table.entries()].find(([key]) => key === id || key.startsWith(`${id}@`))?.[1];

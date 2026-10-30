@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js?v=0.6.8';
+import { fill } from './protocol.js?v=0.6.9';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');

@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const NS = 'model-team';
     // 构建标记：浏览器控制台会打印，用来确认拿到的是哪一版（排查缓存用）。
-    const BUILD = 'v56-devin-speed';
+    const BUILD = 'v57-stop-button';
     const BUNDLE = '@vastplan/model-team';
 
     const zh = {
@@ -404,12 +404,14 @@ window.__ModuleLoader__.load({
 .mt-phase-failed { color: var(--dsw-alias-state-error-primary);
   border-color: var(--dsw-alias-state-error-primary); }
 /* 单家停止：只在运行中出现，尺寸比关闭按钮小一档 */
-.mt-dockStop { flex: none; border: .5px solid var(--dsw-alias-border-l3); background: transparent;
-  color: var(--dsw-alias-label-tertiary); font-family: inherit; font-size: 11px; line-height: 16px;
-  padding: 0 6px; border-radius: var(--dsw-radius-xs); cursor: pointer; }
-.mt-dockStop:hover:not(:disabled) { border-color: var(--dsw-alias-state-error-primary);
-  color: var(--dsw-alias-state-error-primary); }
-.mt-dockStop:disabled { cursor: default; opacity: .5; }
+.mt-dockStop { flex: none; margin-left: auto; width: 22px; height: 22px; display: inline-flex;
+  align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary, #e5484d); color: #fff; cursor: pointer;
+  transition: filter .15s ease, opacity .15s ease; }
+.mt-dockStop:hover:not(:disabled) { filter: brightness(1.12); }
+.mt-dockStop:disabled { cursor: default; opacity: .45; }
+/* 红色图标按钮里的「停止」方块：不靠文字，省宽度 */
+.mt-dockStopIcon { width: 8px; height: 8px; border-radius: 1px; background: currentColor; }
 /* 已停止：不再是失败红，用中性灰，表示「是我们自己停的」 */
 .mt-phase-stopped { color: var(--dsw-alias-label-tertiary); border-color: var(--dsw-alias-border-l3); }
 /* 最新一段输出：跟在状态后方，占剩余空间，超长省略 */
@@ -1089,10 +1091,10 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                   className: 'mt-dockStop',
                   disabled: stopping[item.id] === true,
-                  title: '停止这一个模型（其它家继续跑）',
+                  title: stopping[item.id] ? '停止中…' : '停止这一个模型（其它家继续跑）',
                   'aria-label': `停止 ${item.name ?? item.model}`,
                   onClick: () => stopOne(item),
-                }, stopping[item.id] ? '停止中' : '停止')
+                }, h('span', { className: 'mt-dockStopIcon', 'aria-hidden': 'true' }))
                 : null);
           })) : h('p', { className: 'mt-dockWaiting' }, '等待各模型的第一条进度…')));
     }
