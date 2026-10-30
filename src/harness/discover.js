@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js?v=0.6.9';
+import { fill } from './protocol.js?v=0.7.1';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -85,7 +85,7 @@ export function parseDiscovery(parser, text) {
 
   if (parser === 'bullet') {
     for (const line of lines) {
-      const match = /^\s*-\s+(\S+)\s*$/.exec(line);
+      const match = /^\s*[-*]\s+(\S+)/.exec(line);
       if (match) push(match[1], match[1]);
     }
     return out;

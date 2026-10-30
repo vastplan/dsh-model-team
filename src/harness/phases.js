@@ -43,9 +43,10 @@ export function createPhaseEmitter(onPhase) {
     const delta = source.delta && typeof source.delta === 'object' ? source.delta : null;
     const part = source.part && typeof source.part === 'object' ? source.part : null;
     const thinking = delta?.thinking ?? part?.thinking ?? source.thinking ?? source.reasoning;
-    const text = delta?.text ?? part?.text
-      ?? (typeof source.text === 'string' ? source.text : '')
-      ?? (typeof source.content === 'string' ? source.content : '');
+    const text = delta?.text || part?.text
+      || (typeof source.text === 'string' ? source.text : '')
+      || (typeof source.content === 'string' ? source.content : '')
+      || (typeof source.data === 'string' ? source.data : '');
 
     if (type === 'content_block_delta') {
       if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
@@ -81,6 +82,20 @@ export function createPhaseEmitter(onPhase) {
     if (thinking) {
       thoughts = cap(thoughts + String(thinking));
       emit('thinking', thoughts);
+      return;
+    }
+    if (type === 'thought') {
+      if (text) {
+        thoughts = cap(thoughts + String(text));
+        emit('thinking', thoughts);
+      }
+      return;
+    }
+    if (type === 'text') {
+      if (text) {
+        body = cap(body + String(text));
+        emit('answering', body);
+      }
       return;
     }
     if (type.includes('thinking') || type.includes('reasoning')) {

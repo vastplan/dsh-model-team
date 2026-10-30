@@ -18,6 +18,7 @@ import {
 import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
 import { discoverHarness, logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
 import { parseOutput } from '../src/harness/parse.js';
+import { createPhaseEmitter } from '../src/harness/phases.js';
 import { DEFAULT_PREFS, readPrefs } from '../src/groups.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -473,7 +474,7 @@ test('discover 解析器', () => {
     ['auto', 'claude-opus-5-5-high'],
   );
   assert.deepEqual(
-    parseDiscovery('bullet', '  - grok-4.7\n  - grok-4.6').map((item) => item.id),
+    parseDiscovery('bullet', '  * grok-4.7 (default)\n  - grok-4.6').map((item) => item.id),
     ['grok-4.7', 'grok-4.6'],
   );
   assert.deepEqual(
@@ -585,4 +586,16 @@ test('cliCatalogEntries：范围外 CLI 不发现、不生成条目', async () =
   });
   assert.equal(inside.length, 1);
   assert.equal(inside[0].harness, 'pi');
+});
+
+test('Grok streaming-json：thought/text 进入进度窗', () => {
+  let last = '';
+  const names = [];
+  const emitter = createPhaseEmitter((name) => { last = name; names.push(name); });
+  emitter.feed(JSON.stringify({ type: 'thought', data: '想一想' }));
+  emitter.feed(JSON.stringify({ type: 'text', data: 'OK' }));
+  assert.deepEqual(names, ['thinking', 'answering']);
+  assert.equal(last, 'answering');
+  assert.match(emitter.body, /OK/);
+  assert.match(emitter.thoughts, /想一想/);
 });

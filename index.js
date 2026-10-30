@@ -25,7 +25,7 @@ import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
   clearDiscoveryCache, cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
-} from './src/harness/index.js?v=0.6.9';
+} from './src/harness/index.js?v=0.7.1';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
