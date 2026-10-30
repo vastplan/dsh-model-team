@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js';
+import { fill } from './protocol.js?v=0.6.5';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -91,6 +91,33 @@ export function parseDiscovery(parser, text) {
     return out;
   }
 
+  if (parser === 'devin-json') {
+    // devin models list --format json：families[].variants[]，family 是基础模型，
+    // variant 才带 thinking/speed（如 SWE-2 High / SWE-2 Max Lightning）。
+    let data;
+    try { data = JSON.parse(clean); } catch { return []; }
+    const families = Array.isArray(data?.families) ? data.families : [];
+    for (const family of families) {
+      const modelKey = String(family?.slug ?? family?.family_uid ?? '').trim();
+      if (!modelKey) continue;
+      const familyLabel = String(family?.family_label ?? modelKey).trim() || modelKey;
+      const variants = (Array.isArray(family?.variants) ? family.variants : [])
+        .map((variant) => ({
+          id: String(variant?.model_uid ?? '').trim(),
+          name: String(variant?.label ?? variant?.model_uid ?? '').trim(),
+        }))
+        .filter((variant) => variant.id);
+      if (!variants.length) continue;
+      // 主条目使用 family 基础 id（如 swe-2），显示 family 名；所有 variants 作为同族路由，
+      // 包括 Max/High/Lightning，避免把某个变体偷偷当成基础模型。
+      out.push({ id: modelKey, name: familyLabel, modelKey, harnessModel: modelKey, primary: true });
+      for (const variant of variants) {
+        out.push({ id: variant.id, name: variant.name, modelKey, harnessModel: variant.id });
+      }
+    }
+    return out;
+  }
+
   if (parser === 'devin-table') {
     for (const line of lines) {
       // 形如：`  swe-2-high   SWE-2 High  [262K context, Free]`
@@ -127,9 +154,42 @@ export function parseDiscovery(parser, text) {
  * @param items - `{ id, name?, provider? }[]`。
  * @returns `{ id, name, provider, modelKey, harnessModel }[]`。
  */
-export function normalizeModels(items) {
+export function normalizeModels(items, options = {}) {
+  const list = items ?? [];
+
+  // 保留同族变体（Devin）：一个 family 一条主条目，其余 variants 作为同 modelKey 的路由。
+  if (options.preserveVariants) {
+    const groups = new Map();
+    for (const item of list) {
+      const raw = String(item?.harnessModel ?? item?.id ?? '').trim();
+      if (!raw) continue;
+      const modelKey = String(item?.modelKey ?? logicalKeyOf(raw)).trim();
+      if (!modelKey) continue;
+      const candidate = {
+        id: String(item?.id ?? logicalKeyOf(raw)).trim(),
+        name: String(item?.name ?? raw).trim() || raw,
+        provider: String(item?.provider ?? '').trim(),
+        modelKey,
+        harnessModel: raw,
+        primary: item?.primary === true,
+      };
+      const group = groups.get(modelKey) ?? [];
+      if (!group.some((entry) => entry.harnessModel === raw)) group.push(candidate);
+      groups.set(modelKey, group);
+    }
+    const out = [];
+    for (const group of groups.values()) {
+      group.sort((left, right) => (Number(right.primary) - Number(left.primary))
+        || left.id.localeCompare(right.id));
+      out.push(...group);
+    }
+    return out.sort((left, right) => left.modelKey.localeCompare(right.modelKey)
+      || (Number(right.primary) - Number(left.primary))
+      || left.id.localeCompare(right.id));
+  }
+
   const best = new Map();
-  for (const item of items ?? []) {
+  for (const item of list) {
     const raw = String(item?.id ?? '').trim();
     if (!raw) continue;
     const modelKey = logicalKeyOf(raw);
@@ -199,7 +259,7 @@ export async function discoverHarness(definition, logger) {
     items = [];
   }
 
-  const models = normalizeModels(items);
+  const models = normalizeModels(items, { preserveVariants: definition.discover?.preserveVariants === true });
   CACHE.set(definition.id, { at: Date.now(), models });
   return models;
 }

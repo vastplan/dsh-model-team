@@ -17,7 +17,7 @@
 目录层  catalog.js    —— cliModels → 合成 provider `cli-<harness>`
 ```
 
-内置定义在 [`src/harness/defs.js`](../src/harness/defs.js)：`agent`、`pi`、`zcode`、`opencode`、`qoder`、`devin`、`cline`、`grok`。
+内置定义在 [`src/harness/defs.js`](../src/harness/defs.js)：`agent`、`claude`、`pi`、`zcode`、`opencode`、`qoder`、`devin`、`cline`、`grok`。
 参考实现来自 `skill-project/model-team` 的 `harness_protocol` / `runner_interface` /
 `invoke_exec` / `invoke_parse`，本插件把它收敛成纯数据 + 一个机制层。
 
@@ -93,7 +93,7 @@ command
 | `zcode` | `node zcode.cjs` | `--prompt <prompt> --cwd {workspace} --mode plan --disallowed-tools "Bash Edit Write"` | `disallowed-tools` | 读改写用户 config，`HOME` 指到临时目录（**hook**） |
 | `opencode` | `opencode` | `run --format json --thinking -m {model}#{thinking} <prompt>` | `OPENCODE_PERMISSION` | 强度拼进 `#variant`；v2 事件无 usage |
 | `qoder` | `qoderclicn` | `-p --output-format stream-json --no-session-persistence -m m --reasoning-effort e --disallowed-tools Write,Edit -- <prompt>` | `disallowed-tools` | 可选 `--context-window`（当前未暴露） |
-| `devin` | `{node} {pkgDir}/scripts/devin_acp.mjs` | `--model m --mode ask -- <prompt>` | ACP `ask` | 随包 ACP 客户端，固定只读 |
+| `devin` | `{node} {pkgDir}/scripts/devin_acp.mjs` | `--model m --mode ask -- <prompt>` | ACP `ask` | 随包 ACP 客户端，固定只读；`models list --format json` 按 family 分组，thinking/speed 变体作为同族路由 |
 | `cline` | `cline` | `--json -c {workspace} -p [-P p] -m m --thinking e <prompt>` | `-p` plan | `max` 自动落 `xhigh` |
 | `grok` | `grok` | `-p <prompt> --output-format streaming-json --model m --reasoning-effort e --disallowed-tools write,search_replace` | `disallowed-tools` | 提示词必须紧跟 `-p`，用 `prompt.via: none` |
 
@@ -121,7 +121,7 @@ command
 | opencode | `opencode models` |
 | agent | `agent --list-models` |
 | grok | `grok models` |
-| devin | `devin models list` |
+| devin | `devin models list --format json`（family + variants） |
 | qoder | `qoderclicn --list-models` |
 
 ## 3. 在配置里接新 CLI
@@ -206,7 +206,7 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 `listCatalog()` 在目录构建时对**可用**的 CLI 跑发现：
 
 - 定义里的 `discover`（命令 + parser）或 `hooks.discover()`（读配置）；
-- 解析器：`lines` / `opencode` / `id-dash-name` / `bullet` / `devin-table` / `qoder-table`；
+- 解析器：`lines` / `opencode` / `id-dash-name` / `bullet` / `devin-table` / `devin-json` / `qoder-table`；
 - 按**逻辑模型**去重：取最后一段路由、去掉 `auto-`、归一 `[-_.]`；同一逻辑模型的多个路由
   只留优先级最高的一条（原生 id → `auto/` → `devin/` → `workbuddy/` → `opencode-go/` →
   `zcode/` → `grok/`）；
@@ -216,8 +216,8 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
   范围外的 CLI 不跑发现、不进目录，调用时也会被拒绝。
 - `discoverCli: false` 完全关闭自动发现（范围仍生效）。
 
-**注意**：agent/devin/grok 的模型 id 里带 effort/fast 变体（如 `swe-2-max`、`claude-opus-5-5-high`），
-自动发现会按逻辑 id 去重，但**不会把 effort 变体合并**（它们是不同的 id，本机全量约 1,300 条）。
+**注意**：agent/grok 的模型 id 里带 effort/fast 变体（如 `claude-opus-5-5-high`），自动发现会按逻辑 id 去重；
+Devin 则用 `--format json` 的 `families[].variants[]` 把 family 作为模型、thinking/speed 变体作为同族路由（`modelKey` 相同）。
 嫌多可以 `discoverCli: false` 只用手写条目，或用 `cliModels` 精确补充。
 
 ## 6. 可用性过滤

@@ -15,8 +15,8 @@
  * 既不发现模型、也不生成条目，调用侧也会拒绝（见 `runCandidate`）。
  */
 import { harnessAvailable } from './availability.js';
-import { discoverAll } from './discover.js';
-import { listHarnesses } from './protocol.js';
+import { discoverAll } from './discover.js?v=0.6.5';
+import { listHarnesses } from './protocol.js?v=0.6.5';
 
 const asString = (value, fallback = '') => (value === undefined || value === null ? fallback : String(value));
 
@@ -94,11 +94,17 @@ export async function cliCatalogEntries(config, logger, options = {}) {
     : definitions;
   const discovered = options.discovered
     ?? (options.discover === false ? [] : await discoverAll(scopedDefinitions, logger));
-  const explicitKeys = new Set(entries.map((entry) => `${entry.harness}:${entry.modelKey}`));
+  const explicitByKey = new Map(entries.map((entry) => [`${entry.harness}:${entry.modelKey}`, entry]));
   for (const item of discovered) {
     const definition = byId.get(item.harness);
     if (!definition) continue;
-    if (explicitKeys.has(`${item.harness}:${item.modelKey}`)) continue;
+    const explicit = explicitByKey.get(`${item.harness}:${item.modelKey}`);
+    if (explicit) {
+      // 普通 harness：同 modelKey 的显式条目覆盖自动条目。
+      // preserveVariants（Devin）：只跳过同一 harnessModel，保留同族其它变体。
+      if (definition.discover?.preserveVariants !== true) continue;
+      if (explicit.harnessModel === item.harnessModel) continue;
+    }
     entries.push({
       provider: `cli-${definition.id}`,
       id: item.id,

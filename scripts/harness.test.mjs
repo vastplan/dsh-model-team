@@ -10,10 +10,11 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+
 import {
-  buildLaunch, clearHarnesses, harnessFor, listHarnesses, registerHarness, validateHarness,
-} from '../src/harness/protocol.js';
-import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
+  buildLaunch, clearHarnesses, cliCatalogEntries, harnessFor, listHarnesses,
+  registerBuiltinHarnesses, registerHarness, runHarness, validateHarness,
+} from '../src/harness/index.js';
 import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
 import { discoverHarness, logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
 import { parseOutput } from '../src/harness/parse.js';
@@ -480,6 +481,43 @@ test('discover 解析器', () => {
     parseDiscovery('qoder-table', 'MODEL\nAuto\nQwen3.8-Max').map((item) => item.id),
     ['Auto', 'Qwen3.8-Max'],
   );
+});
+
+test('Devin JSON：family 与 thinking/speed 变体分开', () => {
+  const raw = JSON.stringify({
+    families: [{
+      family_label: 'SWE-2',
+      slug: 'swe-2',
+      variants: [
+        { model_uid: 'swe-2-high', label: 'SWE-2 High' },
+        { model_uid: 'swe-2-max', label: 'SWE-2 Max' },
+        { model_uid: 'swe-2-max-lightning', label: 'SWE-2 Max Lightning' },
+      ],
+    }],
+  });
+  const parsed = parseDiscovery('devin-json', raw);
+  assert.deepEqual(parsed[0], { id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2', primary: true });
+  assert.deepEqual(parsed.slice(1).map((item) => item.id), ['swe-2-high', 'swe-2-max', 'swe-2-max-lightning']);
+
+  const models = normalizeModels(parsed, { preserveVariants: true });
+  assert.equal(new Set(models.map((item) => item.modelKey)).size, 1);
+  assert.equal(models[0].id, 'swe-2');
+  assert.equal(models.length, 4);
+});
+
+test('cliCatalogEntries：Devin 同族变体保留在同一 modelKey 下', async () => {
+  freshRegistry();
+  const entries = await cliCatalogEntries({ cliModels: [] }, undefined, {
+    available: () => true,
+    discover: false,
+    discovered: [
+      { harness: 'devin', id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2', primary: true },
+      { harness: 'devin', id: 'swe-2-high', name: 'SWE-2 High', modelKey: 'swe-2', harnessModel: 'swe-2-high' },
+    ],
+  });
+  assert.equal(entries.length, 2);
+  assert.equal(new Set(entries.map((entry) => entry.modelKey)).size, 1);
+  assert.deepEqual(entries.map((entry) => entry.id).sort(), ['swe-2', 'swe-2-high']);
 });
 
 test('cliCatalogEntries：自动发现条目 + 显式覆盖', async () => {

@@ -196,7 +196,7 @@ model_team_weekly(days: 7)
   范围外的 CLI 不发现模型、不进厂商路由，也不允许调用；执行组编辑器里的模型选项由它决定。
 - 不想自动发现就设 `discoverCli: false`，只列 `cliModels` 里的显式条目（范围仍然生效）。
 - **没装/没配的 CLI 不会出现在厂商路由里**（可用性检查缓存 30s）；登录态要到调用时才会暴露。
-- cline 的 CLI 没有完整模型列表命令，只能发现当前配置的模型。
+- cline 的 CLI 没有完整模型列表命令，只能发现当前配置的模型；Devin 按 family 分组，thinking/speed 变体作为同族路由。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 
 ## 数据落盘

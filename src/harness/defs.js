@@ -324,7 +324,7 @@ export const DEVIN_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
-  discover: { command: 'devin', argv: ['models', 'list'], parser: 'devin-table' },
+  discover: { command: 'devin', argv: ['models', 'list', '--format', 'json'], parser: 'devin-json', preserveVariants: true },
   // 主命令是 node（恒在），真正的 CLI 是 devin；ACP 客户端必须随包存在。
   availability: {
     commands: [{ command: 'devin', fallbacks: ['~/.local/bin/devin'], env: 'DEVIN_BIN' }],

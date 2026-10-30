@@ -23,7 +23,7 @@ const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PARSERS = new Set(['auto', 'jsonl', 'text', 'pi', 'opencode']);
 
 /** 自动发现模型列表的解析器。 */
-const DISCOVER_PARSERS = new Set(['lines', 'opencode', 'id-dash-name', 'bullet', 'devin-table', 'qoder-table']);
+const DISCOVER_PARSERS = new Set(['lines', 'opencode', 'id-dash-name', 'bullet', 'devin-table', 'devin-json', 'qoder-table']);
 
 /** 通用思考档；具体 CLI 可用 `thinking.values` 收窄。 */
 const DEFAULT_THINKING_VALUES = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -178,6 +178,7 @@ export function validateHarness(raw, { source = 'config' } = {}) {
         command: asString(discoverInput.command),
         argv: asArray(discoverInput.argv),
         parser: asString(discoverInput.parser, 'lines'),
+        preserveVariants: discoverInput.preserveVariants === true,
       }
       : null,
     // 目录构建时的可用性检查：主命令 fallbacks / 额外命令 / 额外文件。
