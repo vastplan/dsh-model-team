@@ -1,6 +1,6 @@
 {
   "name": "@vastplan/model-team",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "private": true,
   "description": "多模型团队：用 DSH 的 LLM 服务并发调用各已注册模型，做事后审计、设计分叉与专责推理；带账本、周报与插件页面。",
   "license": "MIT",

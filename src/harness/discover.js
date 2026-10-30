@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js?v=0.6.5';
+import { fill } from './protocol.js?v=0.6.6';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -98,9 +98,15 @@ export function parseDiscovery(parser, text) {
     try { data = JSON.parse(clean); } catch { return []; }
     const families = Array.isArray(data?.families) ? data.families : [];
     for (const family of families) {
-      const modelKey = String(family?.slug ?? family?.family_uid ?? '').trim();
+      // family_uid 是真正的模型 id（如 claude-opus-5-5）；slug 可能带点
+      // （如 claude-opus-5.5），不能直接当 modelKey，否则会和 DSH 的 claude-opus-5-5 分家。
+      const familyUid = String(family?.family_uid ?? '').trim();
+      const slug = String(family?.slug ?? '').trim();
+      const rawBase = /^[a-z0-9][a-z0-9-]*$/.test(familyUid) ? familyUid : slug;
+      const base = rawBase.toLowerCase().replace(/[._]/g, '-');
+      const modelKey = logicalKeyOf(base);
       if (!modelKey) continue;
-      const familyLabel = String(family?.family_label ?? modelKey).trim() || modelKey;
+      const familyLabel = String(family?.family_label ?? base).trim() || base;
       const variants = (Array.isArray(family?.variants) ? family.variants : [])
         .map((variant) => ({
           id: String(variant?.model_uid ?? '').trim(),
@@ -108,11 +114,11 @@ export function parseDiscovery(parser, text) {
         }))
         .filter((variant) => variant.id);
       if (!variants.length) continue;
-      // 主条目使用 family 基础 id（如 swe-2），显示 family 名；所有 variants 作为同族路由，
-      // 包括 Max/High/Lightning，避免把某个变体偷偷当成基础模型。
-      out.push({ id: modelKey, name: familyLabel, modelKey, harnessModel: modelKey, primary: true });
+      // 主条目使用 family 基础 id（如 swe-2 / claude-opus-5-5），显示 family 名；所有 variants
+      // 作为同族路由（含 Max/High/Lightning），不把某个变体偷偷当成基础模型。
+      out.push({ id: modelKey, name: familyLabel, modelKey, harnessModel: base, primary: true });
       for (const variant of variants) {
-        out.push({ id: variant.id, name: variant.name, modelKey, harnessModel: variant.id });
+        out.push({ id: logicalKeyOf(variant.id) || variant.id, name: variant.name, modelKey, harnessModel: variant.id });
       }
     }
     return out;

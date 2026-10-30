@@ -488,6 +488,7 @@ test('Devin JSON：family 与 thinking/speed 变体分开', () => {
     families: [{
       family_label: 'SWE-2',
       slug: 'swe-2',
+      family_uid: 'swe-2',
       variants: [
         { model_uid: 'swe-2-high', label: 'SWE-2 High' },
         { model_uid: 'swe-2-max', label: 'SWE-2 Max' },
@@ -498,6 +499,18 @@ test('Devin JSON：family 与 thinking/speed 变体分开', () => {
   const parsed = parseDiscovery('devin-json', raw);
   assert.deepEqual(parsed[0], { id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2', primary: true });
   assert.deepEqual(parsed.slice(1).map((item) => item.id), ['swe-2-high', 'swe-2-max', 'swe-2-max-lightning']);
+
+  const opus = parseDiscovery('devin-json', JSON.stringify({
+    families: [{
+      family_label: 'Claude Opus 5.5',
+      slug: 'claude-opus-5.5',
+      family_uid: 'claude-opus-5-5',
+      variants: [{ model_uid: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 High' }],
+    }],
+  }))[0];
+  assert.equal(opus.modelKey, 'claude-opus-5-5');
+  assert.equal(opus.harnessModel, 'claude-opus-5-5');
+  assert.equal(opus.name, 'Claude Opus 5.5');
 
   const models = normalizeModels(parsed, { preserveVariants: true });
   assert.equal(new Set(models.map((item) => item.modelKey)).size, 1);

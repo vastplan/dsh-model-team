@@ -15,8 +15,8 @@
  * 既不发现模型、也不生成条目，调用侧也会拒绝（见 `runCandidate`）。
  */
 import { harnessAvailable } from './availability.js';
-import { discoverAll } from './discover.js?v=0.6.5';
-import { listHarnesses } from './protocol.js?v=0.6.5';
+import { discoverAll } from './discover.js?v=0.6.6';
+import { listHarnesses } from './protocol.js?v=0.6.6';
 
 const asString = (value, fallback = '') => (value === undefined || value === null ? fallback : String(value));
 
