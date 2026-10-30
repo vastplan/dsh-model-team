@@ -19,14 +19,21 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 /** JSON.stringify 的安全版本：DSH subagent messages 可能含循环引用或 BigInt。 */
 function safeJson(value) {
   const seen = new WeakSet();
-  return JSON.stringify(value, (_key, item) => {
-    if (typeof item === 'bigint') return String(item);
-    if (item !== null && typeof item === 'object') {
-      if (seen.has(item)) return '[circular]';
-      seen.add(item);
-    }
-    return item;
-  }, 2);
+  try {
+    return JSON.stringify(value, (_key, item) => {
+      if (typeof item === 'bigint') return String(item);
+      if (item !== null && typeof item === 'object') {
+        if (seen.has(item)) return '[circular]';
+        seen.add(item);
+      }
+      return item;
+    }, 2);
+  } catch {
+    // messages may contain a hostile toJSON/getter; keep the audit answer even if
+    // the raw transcript cannot be serialized.
+    const fallback = { ...value, messages: [] };
+    return JSON.stringify(fallback, null, 2);
+  }
 }
 import { join } from 'node:path';
 
