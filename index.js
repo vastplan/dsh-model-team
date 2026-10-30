@@ -802,6 +802,8 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   const promptLlm = `${meta.preamble}${packet}\n${attachmentLlm.appendix}`;
   // subagent 与 CLI 都要「先自己读代码」：有 subagentPreamble 就用它，别再套 llm 的「禁止调工具」。
   const promptTools = `${meta.subagentPreamble || meta.preamble}${packet}\n${attachmentList.appendix}`;
+  /** 场次快照的总体提示词；具体条目仍通过 promptFor 选择正文/清单版本。 */
+  const prompt = viaSubagent || hasCli ? promptTools : promptLlm;
   /** CLI 条目与 subagent 一样拿「范围清单」；DSH llm 条目拿正文。 */
   const promptFor = (entry) => (entry.transport === 'cli' || viaSubagent ? promptTools : promptLlm);
   const attachedFiles = [...new Set([...attachmentLlm.files, ...attachmentList.files])];
