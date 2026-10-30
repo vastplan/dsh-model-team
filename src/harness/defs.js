@@ -29,6 +29,55 @@ export const AGENT_HARNESS = {
   probe: { args: ['status'], classify: 'exit0' },
 };
 
+/**
+ * Claude Code CLI：`-p` 非交互 + `stream-json`，`--include-partial-messages` 出增量。
+ *
+ * 只读：`--permission-mode plan`（计划模式）+ `--restricted`（去掉 Bash/PowerShell 等
+ * 执行类工具，并把文件工具限制在工作区）+ 再 deny 编辑类工具，三道保险。
+ *
+ * Claude 没有模型列表命令（`claude models` 会被当成 prompt），发现只返回官方别名
+ * （sonnet / opus / haiku / fable）和 `~/.claude/settings.json` 里的当前模型。
+ */
+export const CLAUDE_HARNESS = {
+  id: 'claude',
+  label: 'claude',
+  command: 'claude',
+  args: [
+    '-p', '--output-format', 'stream-json', '--verbose',
+    '--include-partial-messages', '--no-session-persistence',
+    '--permission-mode', 'plan', '--restricted', '--permission-prompts', 'none',
+  ],
+  model: { flag: '--model', format: '{model}' },
+  thinking: { flag: '--effort', default: 'high', values: ['', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  tools: { exclude: { flag: '--disallowedTools', default: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] } },
+  prompt: { via: 'argv', separator: '--' },
+  output: { parser: 'auto' },
+  usage: { source: 'stream', aggregate: 'take-last' },
+  capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  availability: { fallbacks: ['~/.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'] },
+  probe: { args: ['--version'], classify: 'exit0' },
+  hooks: {
+    discover() {
+      const models = [
+        { id: 'sonnet', name: 'Claude Sonnet' },
+        { id: 'opus', name: 'Claude Opus' },
+        { id: 'haiku', name: 'Claude Haiku' },
+        { id: 'fable', name: 'Claude Fable' },
+      ];
+      const file = join(homedir(), '.claude', 'settings.json');
+      if (existsSync(file)) {
+        try {
+          const model = JSON.parse(readFileSync(file, 'utf8')).model;
+          if (typeof model === 'string' && model.trim()) {
+            models.push({ id: model.trim(), name: model.trim() });
+          }
+        } catch { /* 配置坏掉不影响别名发现 */ }
+      }
+      return models;
+    },
+  },
+};
+
 /** pi：`--print --mode json` 出 JSON 事件流；`--` 之后是提示词；默认排除改文件工具。 */
 export const PI_HARNESS = {
   id: 'pi',
@@ -291,6 +340,7 @@ export const GROK_HARNESS = {
 
 export const BUILTIN_HARNESSES = [
   AGENT_HARNESS,
+  CLAUDE_HARNESS,
   PI_HARNESS,
   ZCODE_HARNESS,
   OPENCODE_HARNESS,

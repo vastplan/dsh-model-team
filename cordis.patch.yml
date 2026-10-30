@@ -12,8 +12,8 @@
         toolName: model_team
         reportModel: ''
         models: []
-        # CLI harness（可选）：内置 8 家 agent / pi / zcode / opencode / qoder /
-        # devin / cline / grok；在 cliModels 里声明后才以 `cli-<harness>` 出现。
+        # CLI harness（可选）：内置 9 家 agent / claude / pi / zcode / opencode /
+        # qoder / devin / cline / grok；在 cliModels 里声明后才以 `cli-<harness>` 出现。
         # 示例条目见 docs/cli-models.example.json。
         # discoverCli: true   # 自动发现各 CLI 的模型（默认开）
         # cliModels:

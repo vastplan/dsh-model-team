@@ -150,8 +150,8 @@ model_team_weekly(days: 7)
 
 ## CLI Harness（可选）
 
-除了 DSH 已注册模型，插件内置了 8 家 CLI harness 定义：
-`agent` / `pi` / `zcode` / `opencode` / `qoder` / `devin` / `cline` / `grok`。
+除了 DSH 已注册模型，插件内置了 9 家 CLI harness 定义：
+`agent` / `claude` / `pi` / `zcode` / `opencode` / `qoder` / `devin` / `cline` / `grok`。
 其余 CLI 可以在配置里按同一协议追加；定义是**纯数据**，不用改执行层。
 
 各家命令、默认只读纪律与占位符见 [docs/harness-protocol.md](docs/harness-protocol.md)；
@@ -189,7 +189,7 @@ model_team_weekly(days: 7)
 - 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task，
   qoder/devin/grok 用 `disallowed-tools`，cline 默认 `-p` plan 档；凭证由各 CLI 自己的登录态管理，插件不存密钥。
 - devin 用随包的 `scripts/devin_acp.mjs`；zcode 需要本机 ZCode 应用与 `~/.zcode/cli/config.json`。
-- **模型自动发现（默认开）**：pi / zcode / cline 读本机配置；agent / opencode / grok / devin / qoder
+- **模型自动发现（默认开）**：pi / zcode / cline / claude 读本机配置；agent / opencode / grok / devin / qoder
   跑各自的模型列表命令。发现的模型按 `modelKey` 与 DSH 路由合并；`cliModels` 仍可用于**覆盖/补充**
   （同 `tool + modelKey` 时显式条目优先）。发现结果缓存 30 分钟。
 - **可用 CLI 范围**：设置页最上方的「可用 CLI 范围」用芯片选择要启用的 CLI（DSH 自己也在里面）。

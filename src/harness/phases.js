@@ -17,6 +17,7 @@ const cap = (text) => (text.length > MAX_SNIPPET ? text.slice(-MAX_SNIPPET) : te
 export function createPhaseEmitter(onPhase) {
   let body = '';
   let thoughts = '';
+  let sawPartial = false;
   const emit = (name, snippet) => {
     try { onPhase?.(name, snippet); } catch { /* 忽略 */ }
   };
@@ -33,13 +34,49 @@ export function createPhaseEmitter(onPhase) {
       return;
     }
 
-    const type = String(event.type ?? event.event ?? '').toLowerCase();
-    const delta = event.delta && typeof event.delta === 'object' ? event.delta : null;
-    const part = event.part && typeof event.part === 'object' ? event.part : null;
-    const thinking = delta?.thinking ?? part?.thinking ?? event.thinking ?? event.reasoning;
+    // Claude Code `stream_event` 把真正的事件再包一层；先解包再按内容块处理。
+    const source = event.type === 'stream_event' && event.event && typeof event.event === 'object'
+      ? event.event
+      : event;
+    if (event.type === 'stream_event') sawPartial = true;
+    const type = String(source.type ?? source.event ?? '').toLowerCase();
+    const delta = source.delta && typeof source.delta === 'object' ? source.delta : null;
+    const part = source.part && typeof source.part === 'object' ? source.part : null;
+    const thinking = delta?.thinking ?? part?.thinking ?? source.thinking ?? source.reasoning;
     const text = delta?.text ?? part?.text
-      ?? (typeof event.text === 'string' ? event.text : '')
-      ?? (typeof event.content === 'string' ? event.content : '');
+      ?? (typeof source.text === 'string' ? source.text : '')
+      ?? (typeof source.content === 'string' ? source.content : '');
+
+    if (type === 'content_block_delta') {
+      if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+        thoughts = cap(thoughts + delta.thinking);
+        emit('thinking', thoughts);
+      } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+        body = cap(body + delta.text);
+        emit('answering', body);
+      }
+      return;
+    }
+    if (type === 'content_block_start' && source.content_block?.type === 'tool_use') {
+      emit('tool', String(source.content_block.name ?? 'tool'));
+      return;
+    }
+    // assistant 完整消息：有增量时正文已播过，只补工具；没有增量时补文本/思考。
+    if (type === 'assistant' && source.message && Array.isArray(source.message.content)) {
+      for (const block of source.message.content) {
+        if (!block || typeof block !== 'object') continue;
+        if (block.type === 'tool_use') {
+          emit('tool', String(block.name ?? 'tool'));
+        } else if (!sawPartial && block.type === 'text' && typeof block.text === 'string') {
+          body = cap(body + block.text);
+          emit('answering', body);
+        } else if (!sawPartial && block.type === 'thinking' && typeof block.thinking === 'string') {
+          thoughts = cap(thoughts + block.thinking);
+          emit('thinking', thoughts);
+        }
+      }
+      return;
+    }
 
     if (thinking) {
       thoughts = cap(thoughts + String(thinking));

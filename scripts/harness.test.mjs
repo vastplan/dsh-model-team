@@ -15,7 +15,8 @@ import {
 } from '../src/harness/protocol.js';
 import { registerBuiltinHarnesses, runHarness, cliCatalogEntries } from '../src/harness/index.js';
 import { clearAvailabilityCache, harnessAvailable } from '../src/harness/availability.js';
-import { logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
+import { discoverHarness, logicalKeyOf, normalizeModels, parseDiscovery } from '../src/harness/discover.js';
+import { parseOutput } from '../src/harness/parse.js';
 import { DEFAULT_PREFS, readPrefs } from '../src/groups.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -293,11 +294,11 @@ test('runTeam：可用范围关掉 dsh 后，点名 DSH 模型直接拒绝', asy
   );
 });
 
-test('内置 8 家 harness 全部注册', () => {
+test('内置 9 家 harness 全部注册', () => {
   freshRegistry();
   assert.deepEqual(
     listHarnesses().map((item) => item.id),
-    ['agent', 'cline', 'devin', 'grok', 'opencode', 'pi', 'qoder', 'zcode'],
+    ['agent', 'claude', 'cline', 'devin', 'grok', 'opencode', 'pi', 'qoder', 'zcode'],
   );
 });
 
@@ -394,6 +395,57 @@ test('cliCatalogEntries：不可用的 CLI 不进入厂商目录', async () => {
   const config = { cliModels: [{ id: 'k3', tool: 'pi', model: 'auto/kimi-k3' }] };
   assert.equal((await cliCatalogEntries(config, null, { available: () => false, discover: false })).length, 0);
   assert.equal((await cliCatalogEntries(config, null, { available: () => true, discover: false })).length, 1);
+});
+
+test('claude argv：-p + stream-json + plan/restricted 只读', () => {
+  freshRegistry();
+  const argv = buildLaunch(
+    harnessFor('claude'),
+    { harnessModel: 'sonnet', reasoningEffort: 'high' },
+    'PROMPT',
+    { workspace: '/ws', tmpDir: '/tmp' },
+  ).argv;
+  assert.deepEqual(argv, [
+    'claude', '-p', '--output-format', 'stream-json', '--verbose',
+    '--include-partial-messages', '--no-session-persistence',
+    '--permission-mode', 'plan', '--restricted', '--permission-prompts', 'none',
+    '--model', 'sonnet', '--effort', 'high',
+    '--disallowedTools', 'Edit,Write,MultiEdit,NotebookEdit', '--', 'PROMPT',
+  ]);
+});
+
+test('Claude stream-json：assistant/result 正文与用量', () => {
+  const raw = [
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello' }],
+        usage: { input_tokens: 10, output_tokens: 2 },
+      },
+    }),
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: 'Hello',
+      usage: { input_tokens: 10, output_tokens: 2 },
+    }),
+  ].join('\n');
+  const out = parseOutput(raw, 'take-last');
+  assert.equal(out.text, 'Hello');
+  assert.equal(out.usage.input, 10);
+  assert.equal(out.usage.output, 2);
+});
+
+test('Claude 模型发现：官方别名 + 当前配置', async (t) => {
+  freshRegistry();
+  if (!harnessAvailable(harnessFor('claude'))) {
+    t.skip('本机没有 claude');
+    return;
+  }
+  const models = await discoverHarness(harnessFor('claude'));
+  assert.ok(models.some((item) => item.modelKey === 'sonnet'));
+  assert.ok(models.some((item) => item.modelKey === 'opus'));
 });
 
 test('逻辑模型键与路由去重', () => {

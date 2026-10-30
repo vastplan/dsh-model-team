@@ -81,5 +81,12 @@
     "model": "auto/GLM-5.2",
     "name": "GLM-5.2",
     "modelKey": "glm-5-2"
+  },
+  {
+    "id": "sonnet",
+    "tool": "claude",
+    "model": "sonnet",
+    "name": "Claude Sonnet",
+    "modelKey": "sonnet"
   }
 ]

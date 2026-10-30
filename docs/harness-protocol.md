@@ -81,13 +81,14 @@ command
 
 ---
 
-## 2. 内置定义（8 家）
+## 2. 内置定义（9 家）
 
 对齐原型 `runner_interface.ts`，全部在 [`src/harness/defs.js`](../src/harness/defs.js)：
 
 | id | command | 关键 argv（简化） | 只读默认 | 备注 |
 | --- | --- | --- | --- | --- |
 | `agent` | `agent` | `--print --output-format stream-json --mode ask --trust --workspace {workspace} --model {model} <prompt>` | `ask` | 强度写在模型 slug（如 `gemini-3.8-flash-high`） |
+| `claude` | `claude` | `-p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --permission-mode plan --restricted --permission-prompts none --model m --effort e --disallowedTools Edit,Write,MultiEdit,NotebookEdit -- <prompt>` | `plan` + `restricted` | 无 models 命令；发现官方别名 + 当前 `settings.model` |
 | `pi` | `pi` | `--print --mode json --no-session [--provider p] --model m --thinking e --exclude-tools edit,write -- <prompt>` | `exclude-tools` | 用量按 `message_end.usage` 逐轮相加 |
 | `zcode` | `node zcode.cjs` | `--prompt <prompt> --cwd {workspace} --mode plan --disallowed-tools "Bash Edit Write"` | `disallowed-tools` | 读改写用户 config，`HOME` 指到临时目录（**hook**） |
 | `opencode` | `opencode` | `run --format json --thinking -m {model}#{thinking} <prompt>` | `OPENCODE_PERMISSION` | 强度拼进 `#variant`；v2 事件无 usage |
@@ -104,6 +105,9 @@ command
   会话固定 `ask`，`set_mode` 失败即失败。
 - **cline**：默认 `-p`（plan）只读；要 act 档需要另写一个定义（或覆盖 `args`）。
 - **grok**：`prompt.via: none`，所以 `{prompt}` 必须出现在 `args` 里。
+- **claude**：Claude Code 2.x；`--restricted` 会去掉 Bash/PowerShell 等执行类工具、把文件工具限制在工作区，
+  `--permission-mode plan` 再加一层只读。Claude 没有模型列表命令（`claude models` 会被当成 prompt），
+  自动发现只返回 `sonnet` / `opus` / `haiku` / `fable` 和 `~/.claude/settings.json` 里的 `model`。
 
 ### 自动发现来源
 
@@ -112,6 +116,7 @@ command
 | pi | `~/.pi/agent/models.json` 的 `providers[].models[]` |
 | zcode | `~/.zcode/cli/config.json` 的 `builtin:bigmodel-coding-plan` |
 | cline | `~/.cline/data/settings/providers.json` 的当前模型（CLI 无完整列表命令） |
+| claude | `~/.claude/settings.json` 的 `model` + 官方别名（无列表命令） |
 | opencode | `opencode models` |
 | agent | `agent --list-models` |
 | grok | `grok models` |
@@ -145,7 +150,7 @@ command
             modelKey: kimi-k3
 ```
 
-- 8 家的示例条目见 [`docs/cli-models.example.json`](cli-models.example.json)，按本机实际模型/路由改。
+- 9 家的示例条目见 [`docs/cli-models.example.json`](cli-models.example.json)，按本机实际模型/路由改。
 - **自动发现默认开**：`listCatalog()` 会调用各 CLI 的 `discover`/`hooks.discover`；`cliModels` 用于
   覆盖/补充（同 `tool + modelKey` 显式优先）。关掉用 `discoverCli: false`。
 - `tool` 必须是已登记的 harness id（内置或 `harnesses` 里定义的）。
@@ -247,7 +252,7 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 node --test scripts/harness.test.mjs
 ```
 
-覆盖：8 家的 argv、zcode hook、定义校验、起进程/进度/解析/用量、取消（AbortError）、
+覆盖：9 家的 argv、zcode hook、定义校验、起进程/进度/解析/用量、取消（AbortError）、
 非零退出、`cliModels` 目录、以及 `runTeam` 的 CLI 与 DSH 双路径（用 `scripts/fake-cli.mjs`，
 不需要真实 CLI）。
 

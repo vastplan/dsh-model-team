@@ -19,7 +19,8 @@ function preview(value, max = 300) {
 }
 /** cline `--json`：`agent_event` 里再包一层事件（hook_event / run_result / error 与它同级）。 */
 function unwrapEvent(ev) {
-    if (String(ev.type ?? "") === "agent_event" && ev.event && typeof ev.event === "object") {
+    const type = String(ev.type ?? "");
+    if ((type === "agent_event" || type === "stream_event") && ev.event && typeof ev.event === "object") {
         return ev.event;
     }
     return ev;
@@ -217,6 +218,20 @@ function errorEnvelopeText(ev) {
 export function classifyStreamEvent(raw) {
     const ev = unwrapEvent(raw);
     const type = String(ev.type ?? "");
+    // Claude Code `--include-partial-messages`：stream_event 解包后是 content_block_delta/start。
+    if (type === "content_block_delta") {
+        const delta = ev.delta;
+        if (delta && typeof delta === "object") {
+            if (delta.type === "text_delta" && typeof delta.text === "string")
+                return ["answer", delta.text];
+            if (delta.type === "thinking_delta" && typeof delta.thinking === "string")
+                return ["think", delta.thinking];
+        }
+        return ["", ""];
+    }
+    if (type === "content_block_start" && ev.content_block && ev.content_block.type === "tool_use") {
+        return ["tool", String(ev.content_block.name ?? "tool")];
+    }
     // cline `--json`：content_start（增量）/ content_end（整块）是思考与正文；tool 块带工具名与入参/输出
     if (type === "content_start" || type === "content_end") {
         const contentType = String(ev.contentType ?? "");
