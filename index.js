@@ -25,7 +25,7 @@ import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
   clearDiscoveryCache, cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
-} from './src/harness/index.js?v=0.6.6';
+} from './src/harness/index.js?v=0.6.8';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
@@ -736,12 +736,12 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
         const [resolved] = resolveTeam([raw], catalog, []);
         if (resolved) candidates.push(resolved);
       } catch {
-        unknown.push(raw);
+        unknown.push(raw.model ?? String(raw));
       }
     }
     if (unknown.length) {
       ctx.logger?.warn?.(
-        `model-team: 执行组「${group.name}」的候选不在 DSH 已注册路由里，已跳过：${unknown.join(', ')}`,
+        `model-team: 执行组「${group.name}」的候选不在 DSH 已注册路由里，已跳过：${unknown.map((item) => (item?.model ?? item)).join(', ')}` ,
       );
     }
     if (!candidates.length) {
@@ -1344,6 +1344,8 @@ export const Config = z.object({
     modelKey: z.string().default(''),
     efforts: z.array(z.string()).default([]),
     defaultEffort: z.string().default(''),
+    speeds: z.array(z.string()).default([]),
+    defaultSpeed: z.string().default(''),
   })).default([]),
 
   /**
@@ -1432,6 +1434,7 @@ export class ModelTeamService extends TypertRemoteService {
     const candidates = (request.candidates ?? []).map((candidate) => ({
       model: String(candidate.model ?? ''),
       reasoningEffort: String(candidate.reasoningEffort ?? ''),
+      speed: String(candidate.speed ?? ''),
     }));
     if (!candidates.length || !candidates[0].model.trim()) {
       throw new Error('执行组至少需要一个候选模型');
@@ -1453,6 +1456,12 @@ export class ModelTeamService extends TypertRemoteService {
         candidate.reasoningEffort = '';
       } else if (!hit.efforts.includes(candidate.reasoningEffort)) {
         problems.push(`${hit.name} 不支持「${candidate.reasoningEffort}」，可选：${hit.efforts.join('/')}`);
+      }
+      if (candidate.speed) {
+        const speeds = Array.isArray(hit.speeds) && hit.speeds.length ? hit.speeds : [''];
+        if (!speeds.includes(candidate.speed)) {
+          problems.push(`${hit.name} 不支持速度「${candidate.speed}」，可选：${speeds.join('/')}`);
+        }
       }
     }
     const unsupported = problems.filter((note) => note.includes('不支持「'));

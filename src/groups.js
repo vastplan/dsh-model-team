@@ -19,6 +19,8 @@ const candidateSchema = z.object({
   model: z.string(),
   /** 思考强度；空串表示用 provider 默认。 */
   reasoningEffort: z.string(),
+  /** 速度档（Devin 的 fast/lightning 等）；空串表示标准。 */
+  speed: z.string().optional(),
 });
 
 /** 一个执行组。 */
@@ -215,8 +217,12 @@ export function candidatesOf(group) {
     const raw = stripLegacyTail(String(candidate.model ?? '').trim());
     const { head, effort: embedded } = splitEffort(raw);
     const effort = String(candidate.reasoningEffort ?? '').trim() || embedded;
-    return joinEffort(head, effort);
-  }).filter(Boolean);
+    return {
+      model: head,
+      reasoningEffort: effort,
+      speed: String(candidate.speed ?? '').trim(),
+    };
+  }).filter((candidate) => candidate.model);
 }
 
 /**

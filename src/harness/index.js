@@ -7,16 +7,16 @@
  *   listCatalog() 里追加 cliCatalogEntries(config, ctx.logger)；
  *   runCandidate() 里对 `entry.transport === 'cli'` 调 runHarness(...)。
  */
-import { BUILTIN_HARNESSES } from './defs.js?v=0.6.6';
-import { registerHarness } from './protocol.js?v=0.6.6';
+import { BUILTIN_HARNESSES } from './defs.js?v=0.6.8';
+import { registerHarness } from './protocol.js?v=0.6.8';
 
-export { cliCatalogEntries } from './catalog.js?v=0.6.6';
-export { clearDiscoveryCache } from './discover.js?v=0.6.6';
+export { cliCatalogEntries } from './catalog.js?v=0.6.8';
+export { clearDiscoveryCache } from './discover.js?v=0.6.8';
 export { runHarness } from './exec.js';
 export {
   buildLaunch, clearHarnesses, fill, harnessFor, listHarnesses, registerHarness,
   resolveThinking, validateHarness,
-} from './protocol.js?v=0.6.6';
+} from './protocol.js?v=0.6.8';
 
 /** 登记内置定义（pi / opencode）。可重复调用，覆盖同 id 的内置定义。 */
 export function registerBuiltinHarnesses() {

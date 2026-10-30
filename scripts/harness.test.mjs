@@ -335,6 +335,9 @@ test('agent / cline / grok / qoder / devin 的 argv 对齐原型', () => {
   assert.equal(devin[0], process.execPath);
   assert.match(devin[1], /scripts\/devin_acp\.mjs$/);
   assert.deepEqual(devin.slice(2), ['--model', 'swe-2', '--mode', 'ask', '--', 'PROMPT']);
+
+  const tuned = argvOf('devin', { harnessModel: 'claude-opus-5-5', reasoningEffort: 'high', speed: 'fast' });
+  assert.deepEqual(tuned.slice(2), ['--model', 'claude-opus-5-5-high-fast', '--mode', 'ask', '--', 'PROMPT']);
 });
 
 test('zcode hook：写临时 config 并改 HOME', (t) => {
@@ -483,7 +486,7 @@ test('discover 解析器', () => {
   );
 });
 
-test('Devin JSON：family 与 thinking/speed 变体分开', () => {
+test('Devin JSON：family 与 thinking/speed 分开', () => {
   const raw = JSON.stringify({
     families: [{
       family_label: 'SWE-2',
@@ -497,40 +500,41 @@ test('Devin JSON：family 与 thinking/speed 变体分开', () => {
     }],
   });
   const parsed = parseDiscovery('devin-json', raw);
-  assert.deepEqual(parsed[0], { id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2', primary: true });
-  assert.deepEqual(parsed.slice(1).map((item) => item.id), ['swe-2-high', 'swe-2-max', 'swe-2-max-lightning']);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].modelKey, 'swe-2');
+  assert.equal(parsed[0].harnessModel, 'swe-2');
+  assert.deepEqual(parsed[0].efforts, ['', 'high', 'max']);
+  assert.deepEqual(parsed[0].speeds, ['', 'lightning']);
 
   const opus = parseDiscovery('devin-json', JSON.stringify({
     families: [{
       family_label: 'Claude Opus 5.5',
       slug: 'claude-opus-5.5',
       family_uid: 'claude-opus-5-5',
-      variants: [{ model_uid: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 High' }],
+      variants: [{ model_uid: 'claude-opus-5-5-high-fast', label: 'Claude Opus 5.5 High Fast' }],
     }],
   }))[0];
   assert.equal(opus.modelKey, 'claude-opus-5-5');
   assert.equal(opus.harnessModel, 'claude-opus-5-5');
+  assert.deepEqual(opus.efforts, ['', 'high']);
+  assert.deepEqual(opus.speeds, ['', 'fast']);
   assert.equal(opus.name, 'Claude Opus 5.5');
-
-  const models = normalizeModels(parsed, { preserveVariants: true });
-  assert.equal(new Set(models.map((item) => item.modelKey)).size, 1);
-  assert.equal(models[0].id, 'swe-2');
-  assert.equal(models.length, 4);
 });
 
-test('cliCatalogEntries：Devin 同族变体保留在同一 modelKey 下', async () => {
+test('cliCatalogEntries：Devin family 条目带 efforts/speeds', async () => {
   freshRegistry();
   const entries = await cliCatalogEntries({ cliModels: [] }, undefined, {
     available: () => true,
     discover: false,
-    discovered: [
-      { harness: 'devin', id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2', primary: true },
-      { harness: 'devin', id: 'swe-2-high', name: 'SWE-2 High', modelKey: 'swe-2', harnessModel: 'swe-2-high' },
-    ],
+    discovered: [{
+      harness: 'devin', id: 'swe-2', name: 'SWE-2', modelKey: 'swe-2', harnessModel: 'swe-2',
+      efforts: ['', 'high', 'max'], speeds: ['', 'lightning'], defaultEffort: 'max', defaultSpeed: '',
+    }],
   });
-  assert.equal(entries.length, 2);
-  assert.equal(new Set(entries.map((entry) => entry.modelKey)).size, 1);
-  assert.deepEqual(entries.map((entry) => entry.id).sort(), ['swe-2', 'swe-2-high']);
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].efforts, ['', 'high', 'max']);
+  assert.deepEqual(entries[0].speeds, ['', 'lightning']);
+  assert.equal(entries[0].defaultEffort, 'max');
 });
 
 test('cliCatalogEntries：自动发现条目 + 显式覆盖', async () => {

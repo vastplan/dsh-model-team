@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const NS = 'model-team';
     // 构建标记：浏览器控制台会打印，用来确认拿到的是哪一版（排查缓存用）。
-    const BUILD = 'v55-dd-width';
+    const BUILD = 'v56-devin-speed';
     const BUNDLE = '@vastplan/model-team';
 
     const zh = {
@@ -1243,14 +1243,17 @@ window.__ModuleLoader__.load({
         const entry = byModel.get(modelKey);
         if (!entry) return;
         const effort = entry.routes[0]?.defaultEffort || '';
+        const speed = entry.routes[0]?.defaultSpeed || '';
         setDraft({
           ...draft,
           modelKey,
           name: entry.label,
           reasoningEffort: effort,
+          speed,
           candidates: entry.routes.map((route) => ({
             model: `${route.provider}/${route.id}`,
             reasoningEffort: effort,
+            speed,
           })),
         });
       };
@@ -1259,7 +1262,7 @@ window.__ModuleLoader__.load({
         if (createSignal > 0) {
           setDraft({
             groupId: `group-${Date.now().toString(36)}`,
-            modelKey: '', name: '', reasoningEffort: '', candidates: [],
+            modelKey: '', name: '', reasoningEffort: '', speed: '', candidates: [],
             enabled: true, order: groups.length,
           });
           setError('');
@@ -1367,6 +1370,26 @@ window.__ModuleLoader__.load({
         });
       };
 
+      /** 速度档（Devin 的 fast/lightning 等）：和思考强度分开选择。 */
+      const speedSelect = (modelSpec, value, onChange) => {
+        const raw = String(modelSpec ?? '').trim();
+        const whole = (catalog ?? []).find((model) => `${model.provider}/${model.id}` === raw || model.id === raw);
+        const doubled = raw.lastIndexOf('@@');
+        const head = whole ? raw : (doubled > 0 ? raw.slice(0, doubled) : raw);
+        const hit = whole ?? (catalog ?? []).find((model) => `${model.provider}/${model.id}` === head || model.id === head);
+        const supported = Array.isArray(hit?.speeds) && hit.speeds.length ? hit.speeds : [''];
+        if (supported.length <= 1 && !value) return null;
+        const listed = value && !supported.includes(value) ? [...supported, value] : supported;
+        return h(Dropdown, {
+          value: value || '',
+          options: listed.map((speed) => ({ value: speed, label: speed || '标准' })),
+          onChange,
+          placeholder: '标准',
+          narrowed: true,
+          width: 96,
+        });
+      };
+
       /**
        * 追加一条厂商路由。
        *
@@ -1387,7 +1410,7 @@ window.__ModuleLoader__.load({
         if (!spare) return;
         setDraft({
           ...current,
-          candidates: [...current.candidates, { model: spare, reasoningEffort: current.reasoningEffort ?? '' }],
+          candidates: [...current.candidates, { model: spare, reasoningEffort: current.reasoningEffort ?? '', speed: current.speed ?? '' }],
         });
       };
 
@@ -1455,6 +1478,10 @@ window.__ModuleLoader__.load({
         const values = [...new Set((group.candidates ?? []).map((c) => c.reasoningEffort || ''))];
         return values.length === 1 ? values[0] : '';
       };
+      const groupSpeed = (group) => {
+        const values = [...new Set((group.candidates ?? []).map((c) => c.speed || ''))];
+        return values.length === 1 ? values[0] : '';
+      };
 
       /** 编辑器主体：就地展开在它所属的执行组条目里。 */
       const editorBodyOf = (current) => h('div', { className: 'mt-editor' },
@@ -1478,8 +1505,16 @@ window.__ModuleLoader__.load({
                 candidates: current.candidates.map((candidate) => ({ ...candidate, reasoningEffort: value })),
               });
             }),
+            speedSelect(current.candidates[0]?.model, current.speed ?? groupSpeed(current), (value) => {
+              // 速度同样是组级的；Devin 的 fast/lightning 不再拼进模型名。
+              setDraft({
+                ...current,
+                speed: value,
+                candidates: current.candidates.map((candidate) => ({ ...candidate, speed: value })),
+              });
+            }),
             h('span', { className: 'mt-rowHint', style: { margin: 0 } },
-              current.reasoningEffort ? `全部厂商使用「${current.reasoningEffort}」` : 'provider 默认档'))),
+              `${current.reasoningEffort ? `强度「${current.reasoningEffort}」` : 'provider 默认档'}${current.speed || groupSpeed(current) ? ` · 速度「${current.speed || groupSpeed(current)}」` : ''}`))),
 
         current.candidates.length
           ? h('div', { className: 'mt-field' },
@@ -1548,6 +1583,7 @@ window.__ModuleLoader__.load({
                         ...clone,
                         modelKey: hit?.modelKey ?? '',
                         reasoningEffort: clone.candidates?.[0]?.reasoningEffort ?? '',
+                        speed: clone.candidates?.[0]?.speed ?? '',
                       });
                       setError('');
                     },

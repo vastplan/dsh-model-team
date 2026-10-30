@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js?v=0.6.6';
+import { fill } from './protocol.js?v=0.6.8';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -92,14 +92,17 @@ export function parseDiscovery(parser, text) {
   }
 
   if (parser === 'devin-json') {
-    // devin models list --format json：families[].variants[]，family 是基础模型，
-    // variant 才带 thinking/speed（如 SWE-2 High / SWE-2 Max Lightning）。
+    // devin models list --format json：families[].variants[]。
+    // 一个 family 是一条模型；variant 的 model_uid 后缀拆成 effort/speed 两个维度，
+    // 不再把 claude-opus-5-5-high-fast 当成独立模型或路由。
     let data;
     try { data = JSON.parse(clean); } catch { return []; }
+    const effortTokens = new Set(['low', 'medium', 'high', 'xhigh', 'max', 'none', 'minimal']);
+    const speedTokens = new Set(['fast', 'lightning', 'priority', 'slow']);
+    const effortOrder = ['', 'low', 'medium', 'high', 'xhigh', 'max', 'none', 'minimal'];
+    const speedOrder = ['', 'fast', 'lightning', 'priority', 'slow'];
     const families = Array.isArray(data?.families) ? data.families : [];
     for (const family of families) {
-      // family_uid 是真正的模型 id（如 claude-opus-5-5）；slug 可能带点
-      // （如 claude-opus-5.5），不能直接当 modelKey，否则会和 DSH 的 claude-opus-5-5 分家。
       const familyUid = String(family?.family_uid ?? '').trim();
       const slug = String(family?.slug ?? '').trim();
       const rawBase = /^[a-z0-9][a-z0-9-]*$/.test(familyUid) ? familyUid : slug;
@@ -108,18 +111,33 @@ export function parseDiscovery(parser, text) {
       if (!modelKey) continue;
       const familyLabel = String(family?.family_label ?? base).trim() || base;
       const variants = (Array.isArray(family?.variants) ? family.variants : [])
-        .map((variant) => ({
-          id: String(variant?.model_uid ?? '').trim(),
-          name: String(variant?.label ?? variant?.model_uid ?? '').trim(),
-        }))
-        .filter((variant) => variant.id);
+        .map((variant) => String(variant?.model_uid ?? '').trim())
+        .filter(Boolean);
       if (!variants.length) continue;
-      // 主条目使用 family 基础 id（如 swe-2 / claude-opus-5-5），显示 family 名；所有 variants
-      // 作为同族路由（含 Max/High/Lightning），不把某个变体偷偷当成基础模型。
-      out.push({ id: modelKey, name: familyLabel, modelKey, harnessModel: base, primary: true });
+      const efforts = new Set(['']);
+      const speeds = new Set(['']);
       for (const variant of variants) {
-        out.push({ id: logicalKeyOf(variant.id) || variant.id, name: variant.name, modelKey, harnessModel: variant.id });
+        const normalized = logicalKeyOf(variant);
+        const suffix = normalized.startsWith(`${base}-`) ? normalized.slice(base.length + 1) : '';
+        const tokens = suffix.split('-').filter(Boolean);
+        const effort = tokens.find((token) => effortTokens.has(token));
+        const speed = tokens.find((token) => speedTokens.has(token));
+        if (effort) efforts.add(effort);
+        if (speed) speeds.add(speed);
       }
+      const effortList = effortOrder.filter((token) => efforts.has(token));
+      const speedList = speedOrder.filter((token) => speeds.has(token));
+      out.push({
+        id: modelKey,
+        name: familyLabel,
+        modelKey,
+        harnessModel: base,
+        efforts: effortList,
+        speeds: speedList,
+        defaultEffort: effortList.includes('max') ? 'max' : effortList.includes('high') ? 'high' : '',
+        defaultSpeed: speedList.includes('') ? '' : speedList[0],
+        primary: true,
+      });
     }
     return out;
   }
@@ -178,6 +196,10 @@ export function normalizeModels(items, options = {}) {
         modelKey,
         harnessModel: raw,
         primary: item?.primary === true,
+        efforts: Array.isArray(item?.efforts) ? item.efforts.map(String) : undefined,
+        speeds: Array.isArray(item?.speeds) ? item.speeds.map(String) : undefined,
+        defaultEffort: item?.defaultEffort,
+        defaultSpeed: item?.defaultSpeed,
       };
       const group = groups.get(modelKey) ?? [];
       if (!group.some((entry) => entry.harnessModel === raw)) group.push(candidate);
@@ -206,6 +228,10 @@ export function normalizeModels(items, options = {}) {
       provider: String(item?.provider ?? '').trim(),
       modelKey,
       harnessModel: raw,
+      efforts: Array.isArray(item?.efforts) ? item.efforts.map(String) : undefined,
+      speeds: Array.isArray(item?.speeds) ? item.speeds.map(String) : undefined,
+      defaultEffort: item?.defaultEffort,
+      defaultSpeed: item?.defaultSpeed,
     };
     const current = best.get(modelKey);
     const better = !current

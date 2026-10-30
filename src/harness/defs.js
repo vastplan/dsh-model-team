@@ -11,7 +11,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Cursor agent CLI：思考强度写在模型 slug 里；只读档 `--mode ask`。 */
 export const AGENT_HARNESS = {
@@ -28,6 +29,8 @@ export const AGENT_HARNESS = {
   availability: { fallbacks: ['~/.local/bin/agent'] },
   probe: { args: ['status'], classify: 'exit0' },
 };
+
+const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Claude 二进制解析失败时的兜底：当前最新版本（2026-10）。 */
 const CLAUDE_FALLBACK_MODELS = [
@@ -324,7 +327,22 @@ export const DEVIN_HARNESS = {
   output: { parser: 'auto' },
   usage: { source: 'stream', aggregate: 'auto' },
   capabilities: { readOnlyByDefault: true, streamsUsage: true },
-  discover: { command: 'devin', argv: ['models', 'list', '--format', 'json'], parser: 'devin-json', preserveVariants: true },
+  discover: { command: 'devin', argv: ['models', 'list', '--format', 'json'], parser: 'devin-json' },
+  // 思考强度和速度是独立维度：基础 family + `-effort` + `-speed` 拼成 Devin 的 model_uid。
+  hooks: {
+    plan(entry, prompt) {
+      const base = String(entry?.harnessModel ?? entry?.model ?? '').trim();
+      const effort = String(entry?.reasoningEffort ?? '').trim();
+      const speed = String(entry?.speed ?? '').trim();
+      const model = `${base}${effort ? `-${effort}` : ''}${speed ? `-${speed}` : ''}`;
+      return {
+        argv: [
+          process.execPath, join(PKG_DIR, 'scripts/devin_acp.mjs'),
+          '--model', model, '--mode', 'ask', '--', prompt,
+        ],
+      };
+    },
+  },
   // 主命令是 node（恒在），真正的 CLI 是 devin；ACP 客户端必须随包存在。
   availability: {
     commands: [{ command: 'devin', fallbacks: ['~/.local/bin/devin'], env: 'DEVIN_BIN' }],

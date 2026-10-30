@@ -15,8 +15,8 @@
  * 既不发现模型、也不生成条目，调用侧也会拒绝（见 `runCandidate`）。
  */
 import { harnessAvailable } from './availability.js';
-import { discoverAll } from './discover.js?v=0.6.6';
-import { listHarnesses } from './protocol.js?v=0.6.6';
+import { discoverAll } from './discover.js?v=0.6.8';
+import { listHarnesses } from './protocol.js?v=0.6.8';
 
 const asString = (value, fallback = '') => (value === undefined || value === null ? fallback : String(value));
 
@@ -78,6 +78,8 @@ export async function cliCatalogEntries(config, logger, options = {}) {
       name: `${name} · ${definition.label}`,
       efforts,
       defaultEffort: asString(raw.defaultEffort, definition.thinking?.default ?? ''),
+      speeds: Array.isArray(raw.speeds) && raw.speeds.length ? raw.speeds.map((item) => String(item)) : [''],
+      defaultSpeed: asString(raw.defaultSpeed),
       modelKey: asString(raw.modelKey).trim() || id,
       transport: 'cli',
       harness: definition.id,
@@ -100,6 +102,18 @@ export async function cliCatalogEntries(config, logger, options = {}) {
     if (!definition) continue;
     const explicit = explicitByKey.get(`${item.harness}:${item.modelKey}`);
     if (explicit) {
+      // 显式条目可以覆盖模型名/路由，但 Devin 的 effort/speed 维度要补进来，
+      // 否则手写的 `swe-2` 会把自动发现的 efforts/speeds 丢掉。
+      if (Array.isArray(item.efforts) && item.efforts.length
+        && (!Array.isArray(explicit.efforts) || explicit.efforts.length <= 1)) {
+        explicit.efforts = item.efforts;
+        explicit.defaultEffort = item.defaultEffort ?? explicit.defaultEffort;
+      }
+      if (Array.isArray(item.speeds) && item.speeds.length
+        && (!Array.isArray(explicit.speeds) || explicit.speeds.length <= 1)) {
+        explicit.speeds = item.speeds;
+        explicit.defaultSpeed = item.defaultSpeed ?? explicit.defaultSpeed;
+      }
       // 普通 harness：同 modelKey 的显式条目覆盖自动条目。
       // preserveVariants（Devin）：只跳过同一 harnessModel，保留同族其它变体。
       if (definition.discover?.preserveVariants !== true) continue;
@@ -109,8 +123,10 @@ export async function cliCatalogEntries(config, logger, options = {}) {
       provider: `cli-${definition.id}`,
       id: item.id,
       name: `${item.name} · ${definition.label}`,
-      efforts: definition.thinking?.values ?? [''],
-      defaultEffort: definition.thinking?.default ?? '',
+      efforts: Array.isArray(item.efforts) && item.efforts.length ? item.efforts : (definition.thinking?.values ?? ['']),
+      defaultEffort: item.defaultEffort ?? definition.thinking?.default ?? '',
+      speeds: Array.isArray(item.speeds) && item.speeds.length ? item.speeds : [''],
+      defaultSpeed: item.defaultSpeed ?? '',
       modelKey: item.modelKey,
       transport: 'cli',
       harness: definition.id,

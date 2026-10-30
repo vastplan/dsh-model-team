@@ -93,7 +93,7 @@ command
 | `zcode` | `node zcode.cjs` | `--prompt <prompt> --cwd {workspace} --mode plan --disallowed-tools "Bash Edit Write"` | `disallowed-tools` | 读改写用户 config，`HOME` 指到临时目录（**hook**） |
 | `opencode` | `opencode` | `run --format json --thinking -m {model}#{thinking} <prompt>` | `OPENCODE_PERMISSION` | 强度拼进 `#variant`；v2 事件无 usage |
 | `qoder` | `qoderclicn` | `-p --output-format stream-json --no-session-persistence -m m --reasoning-effort e --disallowed-tools Write,Edit -- <prompt>` | `disallowed-tools` | 可选 `--context-window`（当前未暴露） |
-| `devin` | `{node} {pkgDir}/scripts/devin_acp.mjs` | `--model m --mode ask -- <prompt>` | ACP `ask` | 随包 ACP 客户端，固定只读；`models list --format json` 按 family 分组，thinking/speed 变体作为同族路由 |
+| `devin` | `{node} {pkgDir}/scripts/devin_acp.mjs` | `--model m --mode ask -- <prompt>` | ACP `ask` | 随包 ACP 客户端，固定只读；`models list --format json` 按 family 展示，thinking/speed 由组级下拉选择 |
 | `cline` | `cline` | `--json -c {workspace} -p [-P p] -m m --thinking e <prompt>` | `-p` plan | `max` 自动落 `xhigh` |
 | `grok` | `grok` | `-p <prompt> --output-format streaming-json --model m --reasoning-effort e --disallowed-tools write,search_replace` | `disallowed-tools` | 提示词必须紧跟 `-p`，用 `prompt.via: none` |
 
@@ -121,7 +121,7 @@ command
 | opencode | `opencode models` |
 | agent | `agent --list-models` |
 | grok | `grok models` |
-| devin | `devin models list --format json`（family + variants） |
+| devin | `devin models list --format json`（family + effort/speed） |
 | qoder | `qoderclicn --list-models` |
 
 ## 3. 在配置里接新 CLI

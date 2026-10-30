@@ -74,7 +74,10 @@ export function parseEntry(entry, known) {
     const { head, effort } = splitEffort(spec, known);
     const [provider, model] = splitProvider(head);
     const declared = String(entry.reasoningEffort ?? '').trim();
-    return { provider, model, reasoningEffort: declared || effort };
+    return {
+      provider, model, reasoningEffort: declared || effort,
+      speed: String(entry.speed ?? '').trim(),
+    };
   }
   const text = String(entry ?? '').trim();
   if (!text) throw new Error('名单项为空');
@@ -121,7 +124,7 @@ function catalogKnows(catalog) {
 export function resolveTeam(selection, catalog, fallback = []) {
   const raw = Array.isArray(selection) && selection.length ? selection : fallback;
   if (!raw.length) {
-    return catalog.map((entry) => ({ ...entry, reasoningEffort: '' }));
+    return catalog.map((entry) => ({ ...entry, reasoningEffort: '', speed: entry.defaultSpeed ?? '' }));
   }
   const known = catalogKnows(catalog);
   const team = [];
@@ -153,6 +156,7 @@ function resolveEntry(entry, spec) {
     model: entry.id,
     name: entry.name,
     reasoningEffort: spec.reasoningEffort,
+    speed: spec.speed ?? '',
   };
   if (entry.transport === 'cli') {
     resolved.transport = 'cli';

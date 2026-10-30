@@ -82,7 +82,7 @@ const weeklyResult = z.object({
 const groupSchema = z.object({
   groupId: z.string(),
   name: z.string(),
-  candidates: z.array(z.object({ model: z.string(), reasoningEffort: z.string() })),
+  candidates: z.array(z.object({ model: z.string(), reasoningEffort: z.string(), speed: z.string().optional() })),
   enabled: z.boolean(),
   order: z.number(),
 });
@@ -127,6 +127,8 @@ const catalogResult = z.object({
     name: z.string(),
     efforts: z.array(z.string()),
     defaultEffort: z.string(),
+    speeds: z.array(z.string()).optional(),
+    defaultSpeed: z.string().optional(),
     // 跨厂商归一键（页面按它把同一逻辑模型的路由聚成一个执行组）。
     modelKey: z.string().optional(),
     // `cli` = 外部 CLI harness；缺省 = DSH 原生模型。
