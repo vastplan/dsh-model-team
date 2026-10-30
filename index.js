@@ -1075,13 +1075,17 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
           stopNote: row.stopNote,
           unmapped: row.unmapped,
         });
+      } catch (error) {
+        ctx.logger?.warn?.(`model-team: 会话日志写入失败（${row.model}）：${error instanceof Error ? error.message : String(error)}`);
+      }
+      try {
         writeBalanceLog(runDir, {
           model: row.model, provider: row.provider,
           reasoningEffort: row.reasoningEffort, tool: row.tool,
           groupId: row.groupId ?? '',
         });
       } catch (error) {
-        ctx.logger?.warn?.(`model-team: 会话日志写入失败（${row.model}）：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger?.warn?.(`model-team: 调度留痕写入失败（${row.model}）：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     handle.append(teamProgressLine(row), { channel: 'log' });

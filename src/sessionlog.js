@@ -15,6 +15,19 @@
  * 所以 `exit_code` 按"成功 0 / 失败 1"落，真因写在 `stop_note`。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+
+/** JSON.stringify 的安全版本：DSH subagent messages 可能含循环引用或 BigInt。 */
+function safeJson(value) {
+  const seen = new WeakSet();
+  return JSON.stringify(value, (_key, item) => {
+    if (typeof item === 'bigint') return String(item);
+    if (item !== null && typeof item === 'object') {
+      if (seen.has(item)) return '[circular]';
+      seen.add(item);
+    }
+    return item;
+  }, 2);
+}
 import { join } from 'node:path';
 
 /** 本地时间戳，与技能侧 `localStamp()` 同格式（`YYYY-MM-DD HH:mm:ss+08:00`）。 */
@@ -141,7 +154,7 @@ export function writeSessionLog(dir, call) {
       status: call.status,
     },
   };
-  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+  writeFileSync(path, `${safeJson(document)}\n`, 'utf8');
   return path;
 }
 
@@ -177,6 +190,6 @@ export function writeBalanceLog(dir, call) {
       },
     ],
   };
-  writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+  writeFileSync(path, `${safeJson(document)}\n`, 'utf8');
   return path;
 }
