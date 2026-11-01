@@ -132,6 +132,17 @@ model_team_weekly(days: 7)
 | 报告目录 | `~/.model-team` | 报告写在其 `reports/` 下 |
 | 自动上传 | 关 | 需同时满足：开关开 + 目录在 git 仓 + 仓有远端 |
 
+### 统一账本
+
+默认优先使用技能侧统一账本 `~/.model-team/ledger/model-audit-reviews.db`；该文件不存在时回退旧版 `$DSH_HOME/model-team/ledger.db`。迁移旧插件账本：
+
+```bash
+node scripts/migrate-unified-ledger.mjs            # dry-run，只读
+node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账本
+```
+
+插件表（`runs` / `calls` / `call_metric` / `reports`）与技能表（`review_session` / `finding` / `session_summary` 等）在同一 SQLite 文件中各读各的表；技能侧 `record-findings` 不受影响。
+
 配置落点：`$DSH_HOME/storages/model_team_config.json`（执行组 / 绑定 / 偏好）。
 
 静态配置（`cordis.patch.yml`）仍可给这几项：
@@ -144,7 +155,7 @@ model_team_weekly(days: 7)
         toolName: model_team
         models: []          # 默认名单；省略 = 按绑定/全部模型
         reportModel: ''     # 周报总结模型
-        ledgerPath: ''      # 默认 $DSH_HOME/model-team/ledger.db
+        ledgerPath: ''      # 默认优先 ~/.model-team/ledger/model-audit-reviews.db；不存在时回退 $DSH_HOME/model-team/ledger.db
         runsRoot: ''        # 默认 $DSH_HOME/model-team/runs
 ```
 

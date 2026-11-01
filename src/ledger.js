@@ -12,7 +12,8 @@
  *
  * 账本失败一律不致命：打不开就返回 null，工具照常能跑，只是不记账。
  */
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /** 账本 schema 版本；表结构或主键口径变更时递增并写迁移。 */
@@ -40,9 +41,28 @@ export const TEXT_EXCERPT_CHARS = 200;
 /** 保留天数：超期记录在被清理时删除。 */
 export const RETENTION_DAYS = 90;
 
-/** 账本默认落点：DSH 数据根下的独立目录，与 storages/ 平级。 */
+/** 账本默认落点：DSH 数据根下的独立目录，与 storages/ 平级（兼容旧版本）。 */
 export function defaultLedgerPath(dshHome) {
   return join(dshHome, 'model-team', 'ledger.db');
+}
+
+/** 技能侧账本（统一账本模式下的首选落点）。 */
+export function skillLedgerPath(home = homedir()) {
+  return join(home, '.model-team', 'ledger', 'model-audit-reviews.db');
+}
+
+/**
+ * 解析插件账本路径：
+ * 1. 显式配置优先；
+ * 2. 本机存在技能账本时，默认使用技能账本（统一库，兼容技能侧历史与报告）；
+ * 3. 否则回退到旧版插件账本，保证未安装技能账本的机器行为不变。
+ */
+export function resolveLedgerPath({ dshHome, home = homedir(), configured = '' } = {}) {
+  const override = String(configured ?? '').trim();
+  if (override) return override;
+  const unified = skillLedgerPath(home);
+  if (existsSync(unified)) return unified;
+  return defaultLedgerPath(dshHome);
 }
 
 const DDL = [

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import z from '@deepseek-ai/schemastery';
 
-import { callKeyOf, defaultLedgerPath, openLedger, packetHash } from './src/ledger.js';
+import { callKeyOf, openLedger, packetHash, resolveLedgerPath } from './src/ledger.js';
 import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
@@ -1314,7 +1314,7 @@ export const Config = z.object({
   /** 周报总结模型；缺席时取名单首项。 */
   reportModel: z.string().default(''),
 
-  /** 账本库路径；缺席时取 `$DSH_HOME/model-team/ledger.db`。 */
+  /** 账本库路径；缺席时优先统一库 `~/.model-team/ledger/model-audit-reviews.db`，不存在才回退 `$DSH_HOME/model-team/ledger.db`。 */
   ledgerPath: z.string().default(''),
 
   /** 会话日志根；缺席时取 `$DSH_HOME/model-team/runs`（与技能侧 `runs/` 同规则）。 */
@@ -1997,7 +1997,7 @@ export function apply(ctx, config = {}) {
   // 打开只做一次，句柄的 promise 留给 Remote 服务 attach：早先服务侧靠
   // `setTimeout(attach, 100)` 轮询 `ledger`，账本打不开时（`openLedger` 返回 null）
   // 会变成每 100ms 一次的永久定时器。
-  const ledgerReady = openLedger(config.ledgerPath || defaultLedgerPath(dshHome()), ctx.logger);
+  const ledgerReady = openLedger(resolveLedgerPath({ dshHome: dshHome(), configured: config.ledgerPath }), ctx.logger);
   ctx.effect(() => {
     let disposed = false;
     void ledgerReady.then((handle) => {
