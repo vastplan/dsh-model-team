@@ -362,6 +362,17 @@ export class Ledger {
       }));
   }
 
+  /** 单场（页面/自检用）。找不到返回 null。 */
+  runById(runId) {
+    const row = this.db.prepare('SELECT * FROM runs WHERE run_id = ?').get(String(runId ?? ''));
+    if (!row) return null;
+    return {
+      runId: row.run_id, kind: row.kind, mode: row.mode, packetHash: row.packet_hash,
+      startedAt: row.started_at, finishedAt: row.finished_at,
+      total: row.total, answered: row.answered,
+    };
+  }
+
   /** 某些场次的逐模型行（页面用）。 */
   callsOf(runIds) {
     if (!runIds.length) return [];
@@ -406,10 +417,10 @@ export class Ledger {
       }));
   }
 
-  /** 一段时间窗口的聚合（周报用；走 `calls_finished_at` 索引）。 */
+  /** 一段时间窗口的聚合（周报用；走 `calls_finished_at` 索引）。测试场次不计入报告。 */
   aggregate(from, to) {
     const runs = this.db.prepare(
-      'SELECT kind, COUNT(*) AS count FROM runs WHERE finished_at >= ? AND finished_at < ? GROUP BY kind')
+      "SELECT kind, COUNT(*) AS count FROM runs WHERE finished_at >= ? AND finished_at < ? AND kind != 'test' GROUP BY kind")
       .all(from, to);
     const kinds = {};
     let runCount = 0;
@@ -419,12 +430,14 @@ export class Ledger {
     }
     const totalOf = (metric) => this.db.prepare(`
       SELECT COALESCE(SUM(m.value), 0) AS total
-      FROM call_metric m JOIN calls c
-        ON c.run_id = m.run_id AND c.call_id = m.call_id AND c.slot = m.slot
+      FROM call_metric m
+      JOIN calls c ON c.run_id = m.run_id AND c.call_id = m.call_id AND c.slot = m.slot
+      JOIN runs r ON r.run_id = c.run_id AND r.kind != 'test'
       WHERE m.metric = ? AND c.finished_at >= ? AND c.finished_at < ?`).get(metric, from, to).total;
     const totals = this.db.prepare(`
-      SELECT COUNT(*) AS calls, COALESCE(SUM(seconds), 0) AS seconds
-      FROM calls WHERE finished_at >= ? AND finished_at < ?`).get(from, to);
+      SELECT COUNT(*) AS calls, COALESCE(SUM(c.seconds), 0) AS seconds
+      FROM calls c JOIN runs r ON r.run_id = c.run_id AND r.kind != 'test'
+      WHERE c.finished_at >= ? AND c.finished_at < ?`).get(from, to);
     totals.input = totalOf('input_tokens');
     totals.output = totalOf('output_tokens');
     // 先在 calls 上聚合（每条调用恰好一行），指标走子查询取——
@@ -444,6 +457,7 @@ export class Ledger {
              COALESCE(SUM(${metricSum}), 0) AS output,
              COALESCE(SUM(${metricSum}), 0) AS cache_read
       FROM calls c
+      JOIN runs r ON r.run_id = c.run_id AND r.kind != 'test'
       WHERE c.finished_at >= ? AND c.finished_at < ?
       -- 分组要带 provider/name：call_id 只是「model@@effort」，同一个 model id
       -- 若挂在两个 provider 下（或两家的显示名不同），裸列取哪一行由 SQLite 任意决定，

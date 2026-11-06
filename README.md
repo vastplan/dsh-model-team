@@ -37,7 +37,7 @@ CLI 模型与 DSH 路由可以混在同一个执行组里做主备回落。
 
 ![设置页的执行组](docs/images/settings-groups.webp)
 
-- **执行组**：按模型聚合厂商路由，候选顺序即回落顺序（可拖拽排序）。
+- **执行组**：按模型聚合厂商路由，候选顺序即回落顺序（可拖拽排序）；每个组可选执行方式（自动 / 直接 llm / 子代理），并可一键测试整组。
 - **活动绑定**：`audit` / `design` / `reason` 各自派哪些组上场；不选 = 全部启用组。
 - **保存数据**：总开关，控制账本、会话日志、周报与报告；默认关。
 - **周报与报告**：总结模型、报告目录、生成后自动上传。
@@ -117,6 +117,28 @@ model_team_weekly(days: 7)
 
 「停用」的组不参加默认执行；被绑定了也不上场。
 
+#### 执行方式
+
+每个执行组可选：
+
+- `自动`（默认）：跟随 `model_team` 调用时传的 `mode`；
+- `直接调用（llm）`：本组强制走纯推理调用；
+- `子代理（subagent）`：本组强制走子代理（需要宿主启用 `subagents` 服务）。
+
+CLI 候选不受该字段影响，始终按 harness 定义执行（与 `mode` 参数的既有语义一致）。
+
+#### 一键测试
+
+执行组行上的「测试」按钮会：
+
+1. 对组内**每条厂商路由**各跑一次最小请求（`kind='test'`、独立 runId）；
+2. 强制 `save: true`，真实写入账本与会话日志；
+3. 读回数据并逐项校验：`runs` / `calls` / `call_metric` 的字段与计数、摘要长度、token 指标、
+   会话日志 JSON 结构、`packet.txt` / `prompt.md` 快照是否齐全；
+4. 在页面内联显示每条路由的状态、耗时、输出摘要和失败校验项，全部通过才显示「测试通过」。
+
+测试场次不计入周报统计，但保留在账本里可复查。
+
 ### 活动绑定
 
 `audit` / `design` / `reason` 各自绑定一组执行组 id。不绑定时退回全部启用组；
@@ -157,6 +179,7 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
         reportModel: ''     # 周报总结模型
         ledgerPath: ''      # 默认优先 ~/.model-team/ledger/model-audit-reviews.db；不存在时回退 $DSH_HOME/model-team/ledger.db
         runsRoot: ''        # 默认 $DSH_HOME/model-team/runs
+        cliCachePath: ''    # CLI 信息缓存；默认 $DSH_HOME/model-team/cli-cache.json（进设置页只读它，点「刷新 CLI」才重探）
 ```
 
 ## CLI Harness（可选）
@@ -202,11 +225,15 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
 - devin 用随包的 `scripts/devin_acp.mjs`；zcode 需要本机 ZCode 应用与 `~/.zcode/cli/config.json`。
 - **模型自动发现（默认开）**：pi / zcode / cline 读本机配置，claude 从二进制读版本；agent / opencode / grok / devin / qoder
   跑各自的模型列表命令。发现的模型按 `modelKey` 与 DSH 路由合并；`cliModels` 仍可用于**覆盖/补充**
-  （同 `tool + modelKey` 时显式条目优先）。发现结果缓存 30 分钟。
+  （同 `tool + modelKey` 时显式条目优先）。**发现结果与可用性都落盘缓存**
+  （`$DSH_HOME/model-team/cli-cache.json`，可用 `cliCachePath` 改）：进设置页只读缓存，
+  不会再起外部进程；装/卸 CLI、新增模型后点设置页右上角 **「刷新 CLI」** 才重新探测。
 - **可用 CLI 范围**：设置页最上方的「可用 CLI 范围」用芯片选择要启用的 CLI（DSH 自己也在里面）。
   范围外的 CLI 不发现模型、不进厂商路由，也不允许调用；执行组编辑器里的模型选项由它决定。
 - 不想自动发现就设 `discoverCli: false`，只列 `cliModels` 里的显式条目（范围仍然生效）。
-- **没装/没配的 CLI 不会出现在厂商路由里**（可用性检查缓存 30s）；登录态要到调用时才会暴露。
+- **没装/没配的 CLI 不会出现在厂商路由里**（可用性结论同样落盘缓存，点刷新重探）；登录态要到调用时才会暴露。
+- 缓存不自动过期；改了 harness 定义里的 `discover` 命令/解析器时旧缓存按签名自动失效。
+  想彻底重来就删掉 `cli-cache.json`（或点一次「刷新 CLI」）。
 - cline 的 CLI 没有完整模型列表命令，只能发现当前配置的模型；Devin 按 family 分组，thinking/speed 作为独立选择。
 - 完整字段、占位符、argv 顺序、错误/取消语义见 [docs/harness-protocol.md](docs/harness-protocol.md)。
 
@@ -216,8 +243,10 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
 | --- | --- |
 | `$DSH_HOME/model-team/ledger.db` | SQLite：`runs` / `calls` / `call_metric` / `reports` |
 | `$DSH_HOME/model-team/runs/<场次ID>/` | `packet.txt`、`prompt.md`、每跳会话 JSON、`*.balance.json` |
+| `$DSH_HOME/model-team/cli-cache.json` | CLI 信息缓存：本机可用性 + 自动发现的模型（点「刷新 CLI」才重写） |
 
 - 账本主键是 `(run_id, call_id, slot)`：同一模型在两个执行组各跑一次不会互相覆盖。
+- 一键测试写入的场次 `kind='test'`：保留在账本里供复查，但周报与静态报告的聚合会排除它们。
 - 会话日志文件名带模型 / 路由 / 强度 / 槽位（`<模型>.<路由-工具>.<强度>.<槽位>.0.json`），
   真撞名再加序号，不覆盖。
 - 保留 90 天，生成周报时顺手清理（`reports` 一起清）。
@@ -278,6 +307,10 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
     client: fs.readFileSync('./client.js','utf8') }))"
   ```
 
+- 单元与全流程测试（执行组、账本、一键测试校验）：
+  ```bash
+  npm test
+  ```
 - CLI harness 协议测试（用假 CLI，不需要真实 pi/opencode）：
 
   ```bash
@@ -289,6 +322,8 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
 - `mode=subagent` 的子代理 **token 用量拿不到**（host 的 `activation.result` 没有 usage），
   账本记 0、报告显示 `—`；这不代表模型没烧 token。
 - 执行组只把**最终生效的那一跳**写账本；失败的前几跳只留在 `tried` 里，不进周报。
+- 一键测试对 `subagent` 执行方式的组需要活动 Agent（子代理必须挂在真实会话上）；
+  设置页没有活动 Agent 时该组会明确报错，改用 `llm` 组或从 `model_team` 调用里验证子代理路径。
 - 并发闸门默认 12（subagent 模式），受宿主 `maxActiveSubagents` 约束；
   设置页里的 `concurrency` 偏好尚未接入执行路径。
 - 报告自动上传会推送整条分支（不是只推报告那一个 commit）；首次使用前先确认仓库状态。

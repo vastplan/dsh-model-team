@@ -210,7 +210,10 @@ Kimi K3: magpie/group/auto-kimi-k3@@high → cli-pi/k3@@max
 - 按**逻辑模型**去重：取最后一段路由、去掉 `auto-`、归一 `[-_.]`；同一逻辑模型的多个路由
   只留优先级最高的一条（原生 id → `auto/` → `devin/` → `workbuddy/` → `opencode-go/` →
   `zcode/` → `grok/`）；
-- 结果缓存 30 分钟；装好 CLI/新增模型后最多等 30 分钟或重载插件；
+- 结果**落盘缓存**（`$DSH_HOME/model-team/cli-cache.json`，可用 `cliCachePath` 改），不自动过期：
+  进设置页只读缓存，点设置页右上角「刷新 CLI」（Remote `refreshCli`）才重新探测；
+  缓存按定义签名（命令/argv/parser/hook 源码）失效，改完定义不用手动清缓存；
+  某家发现失败也记「已探测（空结果）」，不会每次启动都重跑失败的命令；
 - `cliModels` 优先：同 `tool + modelKey` 的显式条目覆盖自动条目；
 - **范围**：设置页的「可用 CLI 范围」（`prefs.enabledHarnesses`，`null`=全部，含 `'dsh'`）决定哪些 CLI 参与；
   范围外的 CLI 不跑发现、不进目录，调用时也会被拒绝。
@@ -229,7 +232,7 @@ Devin 则用 `--format json` 的 `families[].variants[]` 把 family 作为模型
 - 额外文件：`files`（zcode 的 `~/.zcode/cli/config.json`、devin 的随包脚本）。
 
 不可用的 CLI **不会进入模型目录**，执行组的「厂商路由」里也就看不到它；
-结果缓存 30s，装好 CLI 后最多等 30s 或重载插件。
+结论同样落盘缓存（与发现结果同一份 `cli-cache.json`），装/卸 CLI 后点「刷新 CLI」重新检测。
 **只判断装没装/配没配，不判断登录态**——未登录仍会列出，调用时由 stderr 暴露。
 
 ## 7. 安全与只读

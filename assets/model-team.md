@@ -41,6 +41,8 @@ model_team(
 - `mode=subagent`：每家起一个能读仓库的子 Agent；`files` 只给**清单**（正文让它自己读），审计要顺着 import 追代码时用它。
 - **CLI 条目**（`cli-pi/k3` 这类）不看 `mode`：它按 harness 定义自己的工具能力与只读纪律执行，`files` 同样只给清单。
 
+- **除非用户明确点名/要求临时加模型，否则不要填 `models`**：省略即按活动绑定配置跑。不要把「挑几个能用的模型」自行写进 `models`，那会把清单项追加到配置方案之上，导致实际调用多于配置。
+
 **点名 = 接管同款，不取消绑定**：`models` 里只要命中某个执行组的任一候选，该组就**整组改走点名的那条路由**（主备链只留它）；没被命中的绑定组照常参与；点名里绑定没有的模型作为独立条目追加。想只跑点名的那几家，先到设置里清空/收窄绑定。点名的模型必须能解析，否则**响亮报错并列出可用项**。
 
 ## CLI harness（可选）
@@ -58,9 +60,10 @@ cliModels:
 - CLI 条目必须有绝对 `workspace`（cwd）；`files` 只给清单，CLI 自己读。
 - 默认只读：pi 排除 `edit/write`，opencode 用 `OPENCODE_PERMISSION` 拒绝 edit/write/bash/task；
   凭证由各 CLI 自己的登录态管理，插件不存密钥。
-- 没装/没配的 CLI 不会出现在厂商路由里（缓存 30s）；未登录仍会列出，调用时失败。
-- 默认自动发现各 CLI 的模型（读配置或跑模型列表命令，缓存 30 分钟）；`cliModels` 可覆盖/补充，
-  同 `tool + modelKey` 时显式条目优先。不想发现就设 `discoverCli: false`。
+- 没装/没配的 CLI 不会出现在厂商路由里（可用性结论落盘缓存，点设置页「刷新 CLI」重探）；未登录仍会列出，调用时失败。
+- 默认自动发现各 CLI 的模型（读配置或跑模型列表命令），结果**落盘缓存**
+  （`$DSH_HOME/model-team/cli-cache.json`）：进设置页只读缓存，点右上角「刷新 CLI」才重新探测；
+  `cliModels` 可覆盖/补充，同 `tool + modelKey` 时显式条目优先。不想发现就设 `discoverCli: false`。
 - 设置页最上方「可用 CLI 范围」决定哪些 CLI 参与（DSH 也在范围内）；范围外不发现、不列、不可调用。
 - 字段、占位符、argv 顺序、错误/取消语义见 `docs/harness-protocol.md`。
 

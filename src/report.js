@@ -33,7 +33,8 @@ const fmtTime = (epoch) => new Date(Number(epoch) || 0).toLocaleString('zh-CN', 
 /** 一份报告的数据模型（页面脚本据此重绘，也可直接看表格）。 */
 function collect(ledger, from, to) {
   const facts = ledger.aggregate(from, to);
-  const runs = ledger.recentRuns(200).filter((run) => run.finishedAt >= from && run.finishedAt < to);
+  const runs = ledger.recentRuns(200)
+    .filter((run) => run.finishedAt >= from && run.finishedAt < to && run.kind !== 'test');
   const calls = ledger.callsOf(runs.map((run) => run.runId));
   const reports = ledger.recentReports(10)
     .filter((report) => report.to >= from && report.from < to);

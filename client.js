@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const NS = 'model-team';
     // 构建标记：浏览器控制台会打印，用来确认拿到的是哪一版（排查缓存用）。
-    const BUILD = 'v57-stop-button';
+    const BUILD = 'v60-cli-cache';
     const BUNDLE = '@vastplan/model-team';
 
     const zh = {
@@ -124,10 +124,17 @@ window.__ModuleLoader__.load({
         },
         'modelTeam/catalog': {
           service: 'modelTeam',
-          description: 'List registered models.',
+          description: 'List registered models (CLI part comes from the on-disk cache).',
           invocation: { kind: 'direct' },
           parameters: [],
           result: { mode: 'strict', typeSymbol: `${PACKAGE}/types#Catalog`, create: schemaStub, description: 'catalog', jsonSchema: { type: 'object' } },
+        },
+        'modelTeam/refreshCli': {
+          service: 'modelTeam',
+          description: 'Re-probe CLI availability and re-discover their models (Refresh button).',
+          invocation: { kind: 'direct' },
+          parameters: [],
+          result: { mode: 'strict', typeSymbol: `${PACKAGE}/types#RefreshCli`, create: schemaStub, description: 'refreshed catalog + CLI scope', jsonSchema: { type: 'object' } },
         },
         'modelTeam/saveGroup': {
           service: 'modelTeam',
@@ -144,6 +151,14 @@ window.__ModuleLoader__.load({
           parameters: [{ name: 'request', wire: 'request', description: 'id', source: 'json',
             codec: { mode: 'strict', typeSymbol: `${PACKAGE}/types#RemoveGroup`, create: schemaStub, jsonSchema: { type: 'object' } } }],
           result: { mode: 'strict', typeSymbol: `${PACKAGE}/types#Config`, create: schemaStub, description: 'config', jsonSchema: { type: 'object' } },
+        },
+        'modelTeam/testGroup': {
+          service: 'modelTeam',
+          description: 'Run a one-click end-to-end test and validate persisted data.',
+          invocation: { kind: 'direct' },
+          parameters: [{ name: 'request', wire: 'request', description: 'groupId', source: 'json',
+            codec: { mode: 'strict', typeSymbol: `${PACKAGE}/types#TestGroupRequest`, create: schemaStub, jsonSchema: { type: 'object' } } }],
+          result: { mode: 'strict', typeSymbol: `${PACKAGE}/types#TestGroupResult`, create: schemaStub, description: 'test results', jsonSchema: { type: 'object' } },
         },
         'modelTeam/openReport': {
           service: 'modelTeam',
@@ -241,6 +256,11 @@ window.__ModuleLoader__.load({
 .mt-root { display: flex; flex-direction: column; max-width: 720px; }
 .mt-pageTitle { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
 .mt-intro { color: var(--dsw-alias-label-secondary); margin: 4px 0 0; font-size: 13px; line-height: 20px; }
+/* 标题行：左边标题/说明，右边「刷新 CLI」。进页面只读缓存，刷新是唯一的重探入口。 */
+.mt-pageHead { display: flex; align-items: flex-start; gap: 12px; }
+.mt-pageHead > div { flex: 1; min-width: 0; }
+.mt-refresh { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px; }
+.mt-refreshStamp { font-size: 12px; line-height: 20px; white-space: nowrap; }
 
 /* 官方设置页：每行 padding 16px 0 + .5px 底边框 */
 .mt-root > header { padding-bottom: 8px; }
@@ -493,6 +513,21 @@ window.__ModuleLoader__.load({
 /* 执行组：官方「组」形态（标题 + 说明 + 条目），不用卡片堆叠 */
 .mt-groupHead { display: flex; align-items: center; gap: 8px; }
 .mt-groupHead .mt-rowTitle { flex: 1; }
+
+/* 一键测试结果：贴在执行组列表下方，逐条路由一行的紧凑面板 */
+.mt-testPanel { display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  padding: 10px 12px; border: .5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-layer-1); }
+.mt-testHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.mt-testTitle { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.mt-testRows { display: flex; flex-direction: column; gap: 4px; }
+.mt-testRow { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; }
+.mt-testOk { flex: none; color: var(--dsw-alias-state-success-primary); }
+.mt-testBad { flex: none; color: var(--dsw-alias-state-error-primary); }
+.mt-testModel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--ds-font-family-code, ui-monospace, monospace); color: var(--dsw-alias-label-secondary); }
+.mt-testFails { margin: 2px 0 0; padding-left: 18px; color: var(--dsw-alias-state-error-primary);
+  font-size: 12px; line-height: 18px; }
 
 .mt-groups { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 /* 列表里的条目统一左右 12px 内边距；展开/收起不改变内容宽度 */
@@ -1213,10 +1248,19 @@ window.__ModuleLoader__.load({
      * 用户只选模型；候选自动列出该模型的全部厂商路由，列表顺序即回落顺序。
      * 思考强度是**组级**的，一次设置应用到全部路由。组名不手填，用模型名。
      */
+    const EXEC_MODE_OPTIONS = [
+      { value: 'auto', label: '自动（跟随调用参数）' },
+      { value: 'llm', label: '直接调用（llm）' },
+      { value: 'subagent', label: '子代理（subagent）' },
+    ];
+    const execModeShort = (mode) => ({ auto: '自动', llm: '直接 llm', subagent: '子代理' }[mode ?? 'auto'] ?? '自动');
+
     function GroupEditor({ api, catalog, groups, onChanged, createSignal, onCreate }) {
       const [draft, setDraft] = React.useState(null);
       const [busy, setBusy] = React.useState(false);
       const [error, setError] = React.useState('');
+      const [testBusy, setTestBusy] = React.useState('');
+      const [testView, setTestView] = React.useState(null);
 
       const byModel = React.useMemo(() => {
         const map = new Map();
@@ -1265,7 +1309,7 @@ window.__ModuleLoader__.load({
           setDraft({
             groupId: `group-${Date.now().toString(36)}`,
             modelKey: '', name: '', reasoningEffort: '', speed: '', candidates: [],
-            enabled: true, order: groups.length,
+            enabled: true, order: groups.length, mode: 'auto',
           });
           setError('');
         }
@@ -1280,7 +1324,7 @@ window.__ModuleLoader__.load({
         setBusy(true); setError('');
         try {
           const result = await api.saveGroup({ ...editing, candidates: filled });
-          if (result.ok) { setDraft(null); onChanged(result.value); }
+          if (result.ok) { setDraft(null); setTestView(null); onChanged(result.value); }
           else setError(String(result.error?.message ?? result.error));
         } catch (error) {
           // 远端可能**抛错**而不是返回 `{ok:false}`；没有 finally 时 busy 会永久为 true，
@@ -1295,7 +1339,7 @@ window.__ModuleLoader__.load({
         setBusy(true); setError('');
         try {
           const result = await api.removeGroup({ groupId });
-          if (result.ok) onChanged(result.value);
+          if (result.ok) { setTestView(null); onChanged(result.value); }
           else setError(String(result.error?.message ?? result.error));
         } catch (error) {
           setError(error instanceof Error ? error.message : String(error));
@@ -1518,6 +1562,25 @@ window.__ModuleLoader__.load({
             h('span', { className: 'mt-rowHint', style: { margin: 0 } },
               `${current.reasoningEffort ? `强度「${current.reasoningEffort}」` : 'provider 默认档'}${current.speed || groupSpeed(current) ? ` · 速度「${current.speed || groupSpeed(current)}」` : ''}`))),
 
+        h('div', { className: 'mt-field' },
+          h('span', { className: 'mt-fieldLabel' }, '执行方式'),
+          h('div', { className: 'mt-chips' },
+            EXEC_MODE_OPTIONS.map((option) => {
+              const on = (current.mode ?? 'auto') === option.value;
+              return h('button', {
+                key: option.value,
+                type: 'button',
+                className: on ? 'mt-chip mt-chipOn' : 'mt-chip',
+                disabled: busy,
+                onClick: () => setDraft({ ...current, mode: option.value }),
+              }, [
+                on ? h('span', { key: 'check', className: 'mt-chipCheck' }, '✓') : null,
+                option.label,
+              ]);
+            })),
+          h('span', { className: 'mt-rowHint', style: { margin: 0 } },
+            '自动 = 跟随 model_team 调用时的 mode；选 llm / subagent 则本组强制覆盖。CLI 路由始终按 harness 定义执行。')),
+
         current.candidates.length
           ? h('div', { className: 'mt-field' },
             h('span', { className: 'mt-fieldLabel' }, '厂商路由（按顺序回落，可拖拽排序）'),
@@ -1537,6 +1600,69 @@ window.__ModuleLoader__.load({
             onClick: () => { setDraft(null); setError(''); },
           }, '取消')),
         error ? h('p', { className: 'mt-error' }, error) : null);
+
+      /**
+       * 一键测试：逐条路由真实调用，并校验写入账本/会话日志的数据。
+       * 结果只保留最近一次，显示在列表下方，避免在紧凑的行里再挤一块。
+       */
+      const runTest = async (group) => {
+        setTestBusy(group.groupId);
+        setTestView({ groupName: group.name, busy: true, result: null, error: '' });
+        try {
+          const response = await api.testGroup({ groupId: group.groupId });
+          if (response?.ok) {
+            setTestView({ groupName: group.name, busy: false, result: response.value, error: '' });
+          } else {
+            setTestView({
+              groupName: group.name, busy: false, result: null,
+              error: String(response?.error?.message ?? response?.error ?? '测试失败（未返回原因）'),
+            });
+          }
+        } catch (err) {
+          setTestView({
+            groupName: group.name, busy: false, result: null,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          setTestBusy('');
+        }
+      };
+
+      const testPanel = () => {
+        if (!testView) return null;
+        const result = testView.result;
+        const failedChecks = (result?.results ?? []).flatMap((item) =>
+          (item.checks ?? []).filter((check) => !check.ok)
+            .map((check) => `${item.name}：${check.label}${check.detail ? `（${check.detail}）` : ''}`));
+        return h('div', { className: 'mt-testPanel' },
+          h('div', { className: 'mt-testHead' },
+            h('span', { className: 'mt-testTitle' }, `测试结果 · ${testView.groupName}`),
+            testView.busy
+              ? h('span', { className: 'mt-dim' }, '测试中：逐条路由真实调用并校验落盘数据…')
+              : result
+                ? h('span', { className: result.ok ? 'mt-ok' : 'mt-error' },
+                  result.ok ? `全部通过（${result.results.length} 条路由）` : '未通过')
+                : h('span', { className: 'mt-error' }, '测试失败')),
+          testView.error ? h('p', { className: 'mt-error' }, testView.error) : null,
+          result
+            ? h('div', { className: 'mt-testRows' },
+              result.results.map((item) => {
+                const passed = (item.checks ?? []).filter((check) => check.ok).length;
+                const total = (item.checks ?? []).length;
+                return h('div', { key: item.runId || item.model, className: 'mt-testRow' },
+                  h('span', { className: item.ok ? 'mt-testOk' : 'mt-testBad' }, item.ok ? '✓' : '✗'),
+                  h('span', { className: 'mt-testModel', title: item.model },
+                    `${item.name} · ${item.model}${item.reasoningEffort ? `@${item.reasoningEffort}` : ''}`),
+                  h('span', { className: 'mt-dim' }, `${item.seconds}s`),
+                  h('span', { className: item.ok ? 'mt-dim' : 'mt-error' },
+                    item.ok ? `数据校验 ${passed}/${total} 通过` : (item.error || `数据校验 ${passed}/${total}`)));
+              }))
+            : null,
+          failedChecks.length
+            ? h('ul', { className: 'mt-testFails' },
+              failedChecks.map((line, index) => h('li', { key: `${index}-${line}` }, line)))
+            : null);
+      };
 
       return h('section', { className: 'mt-row' },
         h('div', { className: 'mt-groupHead' },
@@ -1560,6 +1686,7 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'mt-itemTitle' }, group.name),
                   // 思考强度是**组级**的：跟在模型名后一次即可，不该逐条厂商重复。
                   groupEffort(group) ? h('span', { className: 'mt-tag' }, `强度 ${groupEffort(group)}`) : null,
+                  h('span', { className: 'mt-tag' }, execModeShort(group.mode)),
                   h('span', { className: group.enabled ? 'mt-tag mt-tagOk' : 'mt-tag' }, group.enabled ? '启用' : '停用'),
                   h('span', { className: 'mt-dim' }, `${group.candidates.length} 个厂商`)),
                 h('div', { className: 'mt-vendors' },
@@ -1570,6 +1697,12 @@ window.__ModuleLoader__.load({
                     title: candidate.model,
                   }, candidate.model)))),
               h('div', { className: 'mt-itemActions' },
+                h('button', {
+                  className: 'mt-button mt-buttonGhost',
+                  disabled: busy || Boolean(testBusy),
+                  title: '逐条厂商路由真实调用，并校验账本与会话日志',
+                  onClick: () => runTest(group),
+                }, testBusy === group.groupId ? '测试中…' : '测试'),
                 open
                   ? h('button', {
                     className: 'mt-button mt-buttonGhost',
@@ -1586,6 +1719,7 @@ window.__ModuleLoader__.load({
                         modelKey: hit?.modelKey ?? '',
                         reasoningEffort: clone.candidates?.[0]?.reasoningEffort ?? '',
                         speed: clone.candidates?.[0]?.speed ?? '',
+                        mode: clone.mode ?? 'auto',
                       });
                       setError('');
                     },
@@ -1619,6 +1753,8 @@ window.__ModuleLoader__.load({
                 editorBodyOf(editing)))
             : null,
         ]) : null,
+
+        testPanel(),
 
         // 删除失败时编辑器可能没展开（错误只渲染在编辑器里会看不见）。
         error && !editing ? h('p', { className: 'mt-error' }, error) : null,
@@ -1685,7 +1821,8 @@ window.__ModuleLoader__.load({
             `已选 ${picked.length}/${options.length} · 本机可用 ${installed}`)),
         h('p', { className: 'mt-rowHint' },
           '先选范围，再选模型：范围内的 CLI 才会被发现模型并出现在厂商路由里；'
-          + '范围外的既不加载模型，也不允许调用。未安装的置灰。'),
+          + '范围外的既不加载模型，也不允许调用。未安装的置灰；'
+          + '装好/卸载 CLI 后点右上角「刷新 CLI」重新检测（进页面只读缓存，不会自动探测）。'),
         h('div', { className: 'mt-chips' },
           options.map((item) => {
             const on = isOn(item.id);
@@ -1696,7 +1833,7 @@ window.__ModuleLoader__.load({
               disabled: busy || missing,
               onClick: () => toggle(item.id),
               title: missing
-                ? '本机未安装或未配置：装好后重载插件即可选'
+                ? '本机未安装或未配置：装好后点右上角「刷新 CLI」即可选（不用重载插件）'
                 : (item.kind === 'dsh'
                   ? 'DSH 原生模型（含 subagent 路径）'
                   : `${item.label} 的模型会自动发现`),
@@ -1993,13 +2130,20 @@ window.__ModuleLoader__.load({
       const [catalog, setCatalog] = React.useState([]);
       const [createSignal, setCreateSignal] = React.useState(0);
       const [configError, setConfigError] = React.useState('');
+      // CLI 信息的缓存时间与刷新状态：**进页面只读缓存**，只有点「刷新 CLI」才重探。
+      const [refreshedAt, setRefreshedAt] = React.useState(0);
+      const [refreshBusy, setRefreshBusy] = React.useState(false);
+      const [refreshError, setRefreshError] = React.useState('');
       const loadConfig = React.useCallback(async () => {
         if (!api) return;
         try {
           const [cfg, cat] = await Promise.all([api.configuration(), api.catalog()]);
           if (cfg.ok) setConfig(cfg.value);
           else setConfigError(String(cfg.error?.message ?? cfg.error));
-          if (cat.ok) setCatalog(cat.value.models ?? []);
+          if (cat.ok) {
+            setCatalog(cat.value.models ?? []);
+            setRefreshedAt(Number(cat.value.refreshedAt) || 0);
+          }
         } catch (error) {
           // 失败要显示原因：早先静默保持 null，页面按空数组渲染，看起来像「还没有执行组」。
           setConfigError(error instanceof Error ? error.message : String(error));
@@ -2010,11 +2154,41 @@ window.__ModuleLoader__.load({
         if (!api) return;
         try {
           const cat = await api.catalog();
-          if (cat.ok) setCatalog(cat.value.models ?? []);
+          if (cat.ok) {
+            setCatalog(cat.value.models ?? []);
+            setRefreshedAt(Number(cat.value.refreshedAt) || 0);
+          }
         } catch {
           /* 目录拉取失败时保留旧列表，用户可手动刷新 */
         }
       }, [api]);
+      /**
+       * 手动刷新 CLI 信息：唯一会重新起外部进程的入口。
+       * 返回新的模型目录 + 新的「可用 CLI 范围」可用性，页面一次全部更新。
+       */
+      const refreshCli = React.useCallback(async () => {
+        if (!api || refreshBusy) return;
+        setRefreshBusy(true);
+        setRefreshError('');
+        try {
+          const response = await api.refreshCli();
+          if (!response?.ok) {
+            setRefreshError(String(response?.error?.message ?? response?.error ?? '刷新失败（未返回原因）'));
+            return;
+          }
+          const value = response.value ?? {};
+          setCatalog(value.models ?? []);
+          setRefreshedAt(Number(value.refreshedAt) || Date.now());
+          if (Array.isArray(value.harnesses)) {
+            // 可用性变了：范围芯片的置灰状态要跟着更新（装好 CLI 后不用重载插件）。
+            setConfig((current) => (current ? { ...current, harnesses: value.harnesses } : current));
+          }
+        } catch (error) {
+          setRefreshError(error instanceof Error ? error.message : String(error));
+        } finally {
+          setRefreshBusy(false);
+        }
+      }, [api, refreshBusy]);
       React.useEffect(() => { loadConfig(); }, [loadConfig]);
 
       if (state.phase === 'loading') {
@@ -2041,14 +2215,27 @@ window.__ModuleLoader__.load({
         ledgerReady ? null : h('p', { className: 'mt-empty' }, t(dict, 'notReady')),
         configError ? h('p', { className: 'mt-error' }, `配置读取失败：${configError}`) : null,
         h('header', null,
-          h('h1', { className: 'mt-pageTitle' }, '多模型团队'),
-          h('p', { className: 'mt-intro' }, t(dict, 'subtitle')),
+          h('div', { className: 'mt-pageHead' },
+            h('div', null,
+              h('h1', { className: 'mt-pageTitle' }, '多模型团队'),
+              h('p', { className: 'mt-intro' }, t(dict, 'subtitle'))),
+            // CLI 信息只读落盘缓存；这个按钮是唯一的重探入口（进页面不会自动刷新）。
+            h('div', { className: 'mt-refresh' },
+              h('span', { className: 'mt-dim mt-refreshStamp' },
+                refreshedAt ? `CLI 信息：${new Date(refreshedAt).toLocaleString()}` : 'CLI 信息：未缓存'),
+              h('button', {
+                className: 'mt-button mt-buttonGhost',
+                disabled: refreshBusy,
+                onClick: refreshCli,
+                title: '重新检测本机 CLI 并重新发现模型。进设置页只读缓存，只有点这里才会重新探测。',
+              }, refreshBusy ? '刷新中…' : '刷新 CLI'))),
 
           // Host 半落后于磁盘源码：DSH 的 HMR 只热更 Client 半，改完 index.js 得重载插件。
           // 不提示的话，现象是「前端改了、后端行为没变」，很容易被当成修复失败。
           data.settings?.build?.hostFresh === false
             ? h('p', { className: 'mt-error' }, `⚠ ${data.settings.build.note}`)
-            : null),
+            : null,
+          refreshError ? h('p', { className: 'mt-error' }, `刷新失败：${refreshError}`) : null),
 
         // 范围在最上面：它决定下面的执行组能选到哪些厂商路由。
         config?.ready === false

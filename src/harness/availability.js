@@ -5,7 +5,8 @@
  * - 额外命令：`availability.commands`（devin 的 `devin`；支持 `<ENV>` 覆盖，如 `DEVIN_BIN`）。
  * - 额外文件：`availability.files`（zcode 的 `~/.zcode/cli/config.json`、devin 的随包脚本）。
  *
- * 结果缓存 {@link AVAILABILITY_TTL_MS}，避免每次打开设置页都 stat 一遍；
+ * 结论**落盘缓存**（见 `cli-cache.js`）：判定一次就一直沿用，装/卸 CLI 后点设置页的
+ * 「刷新」或调用 `clearAvailabilityCache()` 才重新 stat。这样进设置页不会反复探测。
  * **不判断登录态**——未登录的 CLI 仍会列出，调用时由 stderr 暴露。
  */
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
@@ -13,14 +14,10 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { clearCachedAvailability, getCachedAvailability, setCachedAvailability } from './cli-cache.js';
 import { fill } from './protocol.js';
 
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/** 可用性缓存 TTL：装完 CLI 后最多等这么久（或重载插件）就会出现。 */
-export const AVAILABILITY_TTL_MS = 30_000;
-
-const CACHE = new Map();
 
 const expandHome = (value) => {
   const text = String(value ?? '');
@@ -74,23 +71,26 @@ function checkAvailability(definition, env) {
 /**
  * 判断一个 harness 在本机是否可用。
  *
+ * 结论进 `cli-cache`：命中就返回，**不设置过期时间**；要重新探测（装好 CLI 之后）
+ * 调 {@link clearAvailabilityCache} 或整份刷新（Host 的 `refreshCli`）。
+ *
  * @param definition - 归一化定义。
  * @param entry - 目录条目（当前未使用，留给按条目覆盖）。
  * @param env - 环境变量（默认 `process.env`）。
- * @param now - 当前时间（测试注入）。
+ * @param now - 写入缓存时的时间戳（测试注入）。
  * @returns 可用为 true。
  */
 export function harnessAvailable(definition, entry, env = process.env, now = Date.now()) {
   void entry;
   const key = definition.id;
-  const hit = CACHE.get(key);
-  if (hit && now - hit.at < AVAILABILITY_TTL_MS) return hit.ok;
+  const hit = getCachedAvailability(key);
+  if (hit) return hit.ok;
   const ok = checkAvailability(definition, env);
-  CACHE.set(key, { ok, at: now });
+  setCachedAvailability(key, ok, now);
   return ok;
 }
 
-/** 清空可用性缓存（测试用）。 */
+/** 清空可用性缓存（刷新入口 / 测试用）；之后第一次判定会重新 stat。 */
 export function clearAvailabilityCache() {
-  CACHE.clear();
+  clearCachedAvailability();
 }

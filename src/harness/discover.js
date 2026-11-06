@@ -3,27 +3,26 @@
  * `hooks.discover()`（读本机配置文件），目录构建时自动合并。
  *
  * - 先做可用性检查（`harnessAvailable`）：没装的 CLI 不发现。
- * - 结果缓存 5 分钟；装好 CLI/新增模型后最多等 5 分钟或重载插件。
+ * - 结果**落盘缓存**（`cli-cache.js`），不自动过期：进设置页只读缓存，点「刷新」才重探。
+ * - 发现命令/解析器改过（签名不同）时旧缓存自动失效，不需要用户手动清缓存。
  * - 按**逻辑模型**去重（`logicalKeyOf`）：同一模型的多个厂商路由只留一条，
  *   优先 `auto/` → `devin/` → `workbuddy/` → `opencode-go/` → `zcode/` → `grok/`，
  *   原生模型 id（无 `/`）优先。
  * - 显式 `cliModels` 仍然优先：同 `harness + modelKey` 的自动条目会被显式条目覆盖。
  */
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
-import { fill } from './protocol.js?v=0.7.1';
+import { clearCachedDiscovery, getCachedDiscovery, setCachedDiscovery } from './cli-cache.js';
+import { fill } from './protocol.js?v=0.7.2';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** 自动发现缓存 TTL：模型列表不会秒级变化。 */
-export const DISCOVERY_TTL_MS = 30 * 60_000;
-
-const CACHE = new Map();
 const WARNED = new Set();
 
 /** 去掉终端颜色码（cline/qoder 之类可能带 ANSI）。 */
@@ -263,16 +262,44 @@ async function runDiscoverCommand(definition) {
 }
 
 /**
- * 发现一家 CLI 的模型（带缓存）。
+ * 发现口径的签名：命令 / 参数 / 解析器 / hook 源码任一变化都视为「缓存过期」。
+ *
+ * 没有它的话，改完 `discover.argv` 还读旧缓存，用户会以为修复没生效；
+ * 有了它，插件升级后旧缓存自动作废，不需要用户先点一次刷新。
+ *
+ * @param definition - 归一化定义。
+ * @returns 16 位十六进制签名。
+ */
+export function discoverySignature(definition) {
+  const discover = definition?.discover ?? {};
+  const asText = (value) => (value === undefined || value === null ? '' : String(value));
+  const hook = typeof definition?.hooks?.discover === 'function'
+    ? definition.hooks.discover.toString()
+    : '';
+  return createHash('sha1').update(JSON.stringify({
+    command: asText(discover.command) || asText(definition?.command),
+    argv: Array.isArray(discover.argv) ? discover.argv.map(String) : [],
+    parser: asText(discover.parser),
+    preserveVariants: discover.preserveVariants === true,
+    hook,
+  })).digest('hex').slice(0, 16);
+}
+
+/**
+ * 发现一家 CLI 的模型（带**落盘**缓存，默认不重探）。
  *
  * @param definition - 归一化定义。
  * @param logger - 可选日志器；失败只 warn 一次。
+ * @param options.force - `true` = 忽略缓存重新探测（设置页的「刷新」用）。
  * @returns `{ id, name, provider, modelKey, harnessModel }[]`。
  */
-export async function discoverHarness(definition, logger) {
+export async function discoverHarness(definition, logger, options = {}) {
   if (!harnessAvailable(definition)) return [];
-  const cached = CACHE.get(definition.id);
-  if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models;
+  const signature = discoverySignature(definition);
+  if (options.force !== true) {
+    const cached = getCachedDiscovery(definition.id, signature);
+    if (cached) return cached.models;
+  }
 
   let items = [];
   try {
@@ -292,26 +319,28 @@ export async function discoverHarness(definition, logger) {
   }
 
   const models = normalizeModels(items, { preserveVariants: definition.discover?.preserveVariants === true });
-  CACHE.set(definition.id, { at: Date.now(), models });
-  return models;
+  // 返回**落盘后的同一形状**：首次发现与后续读缓存拿到的字段要一致（落盘会去掉 undefined）。
+  const cached = setCachedDiscovery(definition.id, { at: Date.now(), sig: signature, models });
+  return cached?.models ?? models;
 }
 
 /**
  * 发现全部 CLI 的模型（并行；只处理有 discover/hook 的定义）。
  *
+ * @param options.force - 透传给 {@link discoverHarness}：`true` 时全部重新探测。
  * @returns `{ id, name, provider, modelKey, harnessModel, harness }[]`。
  */
-export async function discoverAll(definitions, logger) {
+export async function discoverAll(definitions, logger, options = {}) {
   const out = [];
   await Promise.all((definitions ?? []).map(async (definition) => {
-    const models = await discoverHarness(definition, logger);
+    const models = await discoverHarness(definition, logger, options);
     for (const model of models) out.push({ ...model, harness: definition.id });
   }));
   return out;
 }
 
-/** 清空发现缓存（测试用）。 */
+/** 清空发现缓存（刷新入口 / 测试用）。可用性结论不受影响。 */
 export function clearDiscoveryCache() {
-  CACHE.clear();
+  clearCachedDiscovery();
   WARNED.clear();
 }

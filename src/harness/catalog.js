@@ -9,14 +9,15 @@
  * 把它写成 DSH 那边的归一化 key（例如 `kimi-k3`）。
  *
  * **可用性过滤**：CLI 没装/没配（`availability` 检查失败）时，条目**不进入目录**，
- * 于是执行组的「厂商路由」下拉里不会出现它；装好后最多等缓存 TTL（30s）或重载插件。
+ * 于是执行组的「厂商路由」下拉里不会出现它；装好/卸载后点设置页的「刷新 CLI」重新检测
+ * （结论落盘缓存，见 `cli-cache.js`）。
  *
  * **范围过滤**：`options.enabled`（Set/数组）里的 harness 才会被加载；不在范围的 CLI
  * 既不发现模型、也不生成条目，调用侧也会拒绝（见 `runCandidate`）。
  */
 import { harnessAvailable } from './availability.js';
-import { discoverAll } from './discover.js?v=0.7.1';
-import { listHarnesses } from './protocol.js?v=0.7.1';
+import { discoverAll } from './discover.js?v=0.7.2';
+import { listHarnesses } from './protocol.js?v=0.7.2';
 
 const asString = (value, fallback = '') => (value === undefined || value === null ? fallback : String(value));
 

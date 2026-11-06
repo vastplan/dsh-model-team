@@ -2,21 +2,27 @@
  * CLI harness 子系统的对外入口：注册内置/配置定义，导出目录与执行函数。
  *
  * 使用方（`index.js`）只需要：
+ *   configureCliCache(defaultCliCachePath(dshHome()), { logger });   // CLI 信息落盘缓存
  *   registerBuiltinHarnesses();
  *   registerConfiguredHarnesses(ctx, config);
  *   listCatalog() 里追加 cliCatalogEntries(config, ctx.logger)；
- *   runCandidate() 里对 `entry.transport === 'cli'` 调 runHarness(...)。
+ *   runCandidate() 里对 `entry.transport === 'cli'` 调 runHarness(...)；
+ *   设置页「刷新」走 `clearCliInfoCache()` + `discoverAll(..., { force: true })`。
  */
-import { BUILTIN_HARNESSES } from './defs.js?v=0.7.1';
-import { registerHarness } from './protocol.js?v=0.7.1';
+import { BUILTIN_HARNESSES } from './defs.js?v=0.7.2';
+import { registerHarness } from './protocol.js?v=0.7.2';
 
-export { cliCatalogEntries } from './catalog.js?v=0.7.1';
-export { clearDiscoveryCache } from './discover.js?v=0.7.1';
+export { cliCatalogEntries } from './catalog.js?v=0.7.2';
+export { clearDiscoveryCache, discoverAll, discoverySignature } from './discover.js?v=0.7.2';
 export { runHarness } from './exec.js';
+export {
+  cliCacheFile, cliCacheSummary, cliCacheUpdatedAt, clearCliInfoCache, configureCliCache,
+  defaultCliCachePath, flushCliCache, touchCliCache,
+} from './cli-cache.js';
 export {
   buildLaunch, clearHarnesses, fill, harnessFor, listHarnesses, registerHarness,
   resolveThinking, validateHarness,
-} from './protocol.js?v=0.7.1';
+} from './protocol.js?v=0.7.2';
 
 /** 登记内置定义（pi / opencode）。可重复调用，覆盖同 id 的内置定义。 */
 export function registerBuiltinHarnesses() {

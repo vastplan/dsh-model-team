@@ -19,25 +19,28 @@ import { fileURLToPath } from 'node:url';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import z from '@deepseek-ai/schemastery';
 
-import { callKeyOf, openLedger, packetHash, resolveLedgerPath } from './src/ledger.js';
+import { callKeyOf, excerpt, openLedger, packetHash, resolveLedgerPath } from './src/ledger.js';
 import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
-  clearDiscoveryCache, cliCatalogEntries, harnessFor, listHarnesses, registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness,
-} from './src/harness/index.js?v=0.7.1';
+  clearCliInfoCache, cliCacheSummary, cliCacheUpdatedAt, cliCatalogEntries, configureCliCache,
+  defaultCliCachePath, discoverAll, flushCliCache, harnessFor, listHarnesses,
+  registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness, touchCliCache,
+} from './src/harness/index.js?v=0.7.2';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {
-  candidatesOf, openConfig, readBinding, readBindings, readGroups, readPrefs,
+  candidatesOf, normalizeMode, openConfig, readBinding, readBindings, readGroups, readPrefs,
   saveBinding,
 
   saveGroup as storeGroup, deleteGroup as dropGroup, savePrefs as storePrefs,
 } from './src/groups.js';
-import { resolveTeam, splitEffort } from './src/team.js';
+import { resolveTeam, splitEffort, joinEffort } from './src/team.js';
 import { factsForModel, WEEKLY_PREAMBLE } from './src/weekly.js';
 import { reportsDir, writeReport } from './src/report.js';
 import { publishReports } from './src/publish.js';
+import { validateTestRun } from './src/selftest.js';
 
 /**
  * 本入口模块被**求值**的时刻。
@@ -82,6 +85,17 @@ export const KINDS = {
     preamble:
       '本场是专责推理，不是设计分叉，也不是事后审计。\n你就是被询问的模型。直接在本回复给出结构化方案：结论、步骤、风险、非目标。\n'
       + '硬规则：不要改成 2～4 个方向（那是设计分叉）。禁止施工稿/文件清单/编码顺序。可以标推荐，推荐不是用户已选定。\n',
+  },
+  /**
+   * 一键测试专用：只验证「模型 + 路由 + 执行方式 + 落盘」这条链路通不通。
+   * 不出现在 `model_team` 工具的 kind 枚举里，只有设置页的测试按钮会用到。
+   */
+  test: {
+    label: '一键测试',
+    preamble:
+      '这是一次连通性自检，不是审计任务。请只回复一行：OK-SELFTEST。不要调用任何工具，不要解释。\n',
+    subagentPreamble:
+      '这是一次连通性自检，不是审计任务。不要读取或修改任何文件，只回复一行：OK-SELFTEST。\n',
   },
 };
 
@@ -572,8 +586,9 @@ export function renderTeamMarkdown(value) {
   const models = value?.models ?? [];
   if (!models.length) return '（没有模型参与）';
   const ok = models.filter((row) => row.status === 'done').length;
+  const modeLabel = { llm: '纯推理', subagent: '子代理', cli: 'CLI', mixed: '混合执行方式' }[value.mode] ?? value.mode;
   const lines = [
-    `**${value.label ?? value.kind}** · ${value.mode === 'subagent' ? '子代理' : '纯推理'} · `
+    `**${value.label ?? value.kind}** · ${modeLabel} · `
       + `${ok}/${models.length} 有结果`,
   ];
 
@@ -637,7 +652,15 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
       : 'DSH 里没有已注册的 LLM provider 或 provider 未列出模型，请先在设置里配置模型');
   }
   const viaSubagent = args.mode === 'subagent';
-  if (viaSubagent && !ctx.get('subagents')) throw new Error('mode=subagent 需要 subagents 服务');
+  /**
+   * 组级执行方式：`auto` 跟随本次调用的 `mode`，`llm`/`subagent` 强制覆盖。
+   * CLI 候选不受影响（transport=cli 的分支优先），见 runCandidate。
+   */
+  const viaSubagentOf = (group) => {
+    if (group?.mode === 'llm') return false;
+    if (group?.mode === 'subagent') return true;
+    return viaSubagent;
+  };
   const allGroups = readGroups(configStore);
   const enabledGroups = allGroups.filter((group) => group.enabled);
   const wantedGroups = args.groups ?? [];
@@ -725,7 +748,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     // 早先的实现只是把「同款同档」的候选从链里摘掉——点名备选时会退化成跑主力，
     // 与用户意图正好相反（真机：点名 devin/kimi-k3，账本里跑的却是 group/auto-kimi-k3）。
     const takeover = claimed.get(group.groupId);
-    if (takeover) return { group, candidates: [takeover] };
+    if (takeover) return { group, candidates: [takeover], viaSubagent: viaSubagentOf(group) };
     // 逐候选解析：**失效的候选跳过，不拖垮同组其它候选**。
     // 路由改名（`group/auto-*` → `auto/*`）时，旧候选会解析失败；
     // 以前一条失败就 `resolveTeam` 抛错、整场无法开跑，现在改用同组的备选继续。
@@ -747,7 +770,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     if (!candidates.length) {
       ctx.logger?.warn?.(`model-team: 执行组「${group.name}」没有可用候选，本场跳过`);
     }
-    return { group, candidates };
+    return { group, candidates, viaSubagent: viaSubagentOf(group) };
   }).filter((plan) => plan.candidates.length);
 
   // 没被任何组认领的点名：作为独立列表项追加（相当于临时加一家）。
@@ -771,8 +794,18 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   // 没有专门写 `subagentPreamble` 的活动（design / reason）沿用 llm 版。
 
   // 本次参与的所有条目（列表项 + 每个组的候选）：决定要不要准备 CLI 用的清单。
+  // 同时给每条打上**本次实际执行方式**：组级 mode 覆盖调用参数（CLI 由 harness 决定）。
+  for (const entry of team) entry.viaSubagent = viaSubagent;
+  for (const plan of groupPlans) {
+    for (const entry of plan.candidates) entry.viaSubagent = plan.viaSubagent;
+  }
   const candidateEntries = [...team, ...groupPlans.flatMap((plan) => plan.candidates)];
   const hasCli = candidateEntries.some((entry) => entry.transport === 'cli');
+  const hasDshLlm = candidateEntries.some((entry) => entry.transport !== 'cli' && entry.viaSubagent !== true);
+  const hasToolEntries = hasCli || candidateEntries.some((entry) => entry.transport !== 'cli' && entry.viaSubagent === true);
+  if (candidateEntries.some((entry) => entry.transport !== 'cli' && entry.viaSubagent === true) && !ctx.get('subagents')) {
+    throw new Error('mode=subagent 需要 subagents 服务');
+  }
   const workspace = String(args.workspace ?? '').trim();
 
   // `files` 在三种调用面上都生效，但**给的东西不同**：
@@ -783,13 +816,11 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   //   「这次审计涉及这些文件」。所以只给清单，正文让它自己读。
   let attachmentLlm = { appendix: '', files: [], missing: [] };
   let attachmentList = { appendix: '', files: [], missing: [] };
-  // 只有真的存在 DSH llm 条目时才需要读正文（纯 CLI 场次不该因为目录文件被误判成「读不到」）。
-  const hasDshLlm = !viaSubagent && candidateEntries.some((entry) => entry.transport !== 'cli');
   if (Array.isArray(args.files) && args.files.length) {
     // **有读不到的文件就直接失败**，不要静默跳过。
     // 踩过：Host 进程的 cwd 不是项目目录，相对路径全解析成「不存在」，
     // 附件为空却照常开跑，模型回一句「没看到附件」——调用方完全看不出是路径错了。
-    if (viaSubagent || hasCli) attachmentList = listAttachments(args.files, args.workspace);
+    if (hasToolEntries) attachmentList = listAttachments(args.files, args.workspace);
     if (hasDshLlm) attachmentLlm = readAttachments(args.files, args.workspace);
     const missing = [...new Set([...attachmentLlm.missing, ...attachmentList.missing])];
     if (missing.length) {
@@ -803,9 +834,9 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   // subagent 与 CLI 都要「先自己读代码」：有 subagentPreamble 就用它，别再套 llm 的「禁止调工具」。
   const promptTools = `${meta.subagentPreamble || meta.preamble}${packet}\n${attachmentList.appendix}`;
   /** 场次快照的总体提示词；具体条目仍通过 promptFor 选择正文/清单版本。 */
-  const prompt = viaSubagent || hasCli ? promptTools : promptLlm;
+  const prompt = hasDshLlm ? promptLlm : promptTools;
   /** CLI 条目与 subagent 一样拿「范围清单」；DSH llm 条目拿正文。 */
-  const promptFor = (entry) => (entry.transport === 'cli' || viaSubagent ? promptTools : promptLlm);
+  const promptFor = (entry) => (entry.transport === 'cli' || entry.viaSubagent === true ? promptTools : promptLlm);
   const attachedFiles = [...new Set([...attachmentLlm.files, ...attachmentList.files])];
 
   // **总开关**：只有打开「保存数据」才落会话日志与账本。
@@ -863,7 +894,8 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
    *
    * 只对 `subagent` 模式生效；`llm` 模式是纯流式调用，没有子代理名额限制。
    */
-  const maxConcurrent = viaSubagent
+  const anySubagent = candidateEntries.some((entry) => entry.transport !== 'cli' && entry.viaSubagent === true);
+  const maxConcurrent = anySubagent
     ? Math.max(1, Number(args.concurrency ?? config.concurrency ?? 12) || 12)
     : Number.POSITIVE_INFINITY;
   let running = 0;
@@ -986,7 +1018,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
       }
       const result = entry.transport === 'cli'
         ? await callCli(ctx, entry, options, callSignal)
-        : viaSubagent
+        : entry.viaSubagent === true
           ? await callSubagent(ctx, ctx.get('subagents'), entry, options, callSignal, parentAgent)
           : await callLlm(ctx, entry, options, callSignal);
       row.text = result.text;
@@ -1062,7 +1094,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     row.tail = row.text || row.tail || '';
     row.tool = entry.transport === 'cli'
       ? entry.harness
-      : viaSubagent ? 'dsh-subagent' : 'dsh-llm';
+      : entry.viaSubagent === true ? 'dsh-subagent' : 'dsh-llm';
     // 会话日志与调度留痕：正文、思考、消息、用量全落，便于备查。
     if (runDir) {
       try {
@@ -1129,15 +1161,24 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     ],
   }), { channel: 'log' });
 
-  // 列表项：每项各跑一次，并发。
-  const listRuns = team.map(async (entry) => await withSlot(async () => {
+  // 列表项：每项各跑一次，并发；只有 subagent 调用需要抢子代理名额。
+  const runOne = async (entry) => {
     const row = await runCandidate(entry, '');
     rows.push(row);
     handle.updateProgress(`${rows.length}/${total} 已结束`);
-  }));
+  };
+  const listRuns = team.map(async (entry) => (
+    entry.viaSubagent === true && entry.transport !== 'cli'
+      ? withSlot(async () => runOne(entry))
+      : runOne(entry)
+  ));
 
   // 执行组：组内按主备顺序回落——第一个有结果即停，后面的不再调用。
-  const groupRuns = groupPlans.map(async (plan) => await withSlot(async () => {
+  const groupRuns = groupPlans.map(async (plan) => await (plan.viaSubagent && plan.candidates.some((entry) => entry.transport !== 'cli')
+    ? withSlot(async () => runGroup(plan))
+    : runGroup(plan)));
+
+  async function runGroup(plan) {
     const tried = [];
     // 备选**不能提前播报成「等待」**。
     //
@@ -1185,7 +1226,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
       tried: tried.map((row) => `${callKeyOf(row.model, row.reasoningEffort)}:${row.status}`),
     });
     handle.updateProgress(`${rows.length}/${total} 已结束`);
-  }));
+  }
 
   await Promise.all([...listRuns, ...groupRuns]);
   if (runKey) ACTIVE_RUNS.delete(runKey);
@@ -1212,10 +1253,14 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     }), { channel: 'log' });
   } catch { /* 快照失败不影响返回值 */ }
 
+  // 场次级 mode：所有条目一致才写具体值；组级执行方式不同则记 mixed。
+  const modeSet = new Set(candidateEntries.map((entry) => (
+    entry.transport === 'cli' ? 'cli' : entry.viaSubagent === true ? 'subagent' : 'llm'
+  )));
   return {
     kind,
     label: meta.label,
-    mode: viaSubagent ? 'subagent' : 'llm',
+    mode: modeSet.size === 1 ? [...modeSet][0] : 'mixed',
     runId: args.runId,
     logDir: runDir ?? '',
     // 本次是否落盘：关着时账本/会话日志都没有，报告与周报自然为空。
@@ -1228,6 +1273,113 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     // 因为点名而被跳过的执行组数量（0 = 本次就是按配置跑的）。
     skippedGroups,
     models: rows,
+  };
+}
+
+/**
+ * 一键测试一个执行组的实现（与 Remote 服务解耦，便于测试）。
+ *
+ * 每条候选单独跑一场 `kind='test'` 的正式 runTeam，强制落盘后读回校验。
+ */
+export async function runGroupSelfTest(ctx, ledger, store, pluginConfig, group) {
+  const candidates = candidatesOf(group);
+  if (!candidates.length) throw new Error('执行组没有候选模型');
+  if (!ledger) throw new Error('账本未就绪：SQLite 打不开（看 Host 日志里的真因）');
+
+  // 组级 auto = 测试按默认 llm 跑（与 model_team 不传 mode 的行为一致）。
+  const configuredMode = group.mode === 'subagent' ? 'subagent' : group.mode === 'llm' ? 'llm' : 'auto';
+  const testMode = configuredMode === 'auto' ? 'llm' : configuredMode;
+
+  const results = [];
+  const actualModes = new Set();
+  for (const candidate of candidates) {
+    const spec = joinEffort(candidate.model, candidate.reasoningEffort);
+    const runId = `selftest-${newRunId()}`;
+    try {
+      const outcome = await runTeam(ctx, {
+        append() {},
+        updateProgress() {},
+      }, {
+        kind: 'test',
+        packet: 'SELFTEST',
+        groups: [group.groupId],
+        // 点名同一候选：runTeam 会「接管」该组，确保这场只跑这一条路由。
+        models: [spec],
+        mode: testMode,
+        save: true,
+        // CLI 需要绝对 cwd；测试不读仓库，用宿主进程目录即可。
+        workspace: process.cwd(),
+        attempt_timeout: 60,
+        silence: 30,
+        runId,
+      }, pluginConfig ?? {}, store, undefined, undefined);
+
+      if (!outcome.persisted) throw new Error('测试未能落盘：场次目录不可写');
+      actualModes.add(outcome.mode);
+      const row = outcome.models?.[0];
+      if (!row) throw new Error('测试没有返回模型结果');
+      ledger.recordRun({
+        runId,
+        kind: outcome.kind,
+        mode: outcome.mode,
+        packetHash: packetHash('SELFTEST'),
+        startedAt: outcome.started_at,
+        finishedAt: outcome.finished_at,
+      }, outcome.models);
+
+      const validation = validateTestRun({
+        ledger,
+        runId,
+        group,
+        // 用实际解析后的模型 id/厂商校验：候选配置可能带 provider 前缀，
+        // 而账本里的 model 是目录 id（例如 `group/auto-kimi-k3`）。
+        candidate: {
+          model: row.model,
+          provider: row.provider,
+          reasoningEffort: row.reasoningEffort ?? candidate.reasoningEffort,
+        },
+        mode: outcome.mode,
+      });
+      results.push({
+        model: candidate.model,
+        provider: row.provider ?? '',
+        name: row.name ?? candidate.model,
+        reasoningEffort: candidate.reasoningEffort ?? '',
+        status: row.status ?? 'failed',
+        seconds: row.seconds ?? 0,
+        text: excerpt(row.text ?? ''),
+        error: row.error ?? '',
+        runId,
+        logPath: row.logPath ?? '',
+        checks: validation.checks,
+        ok: row.status === 'done' && validation.ok,
+      });
+    } catch (error) {
+      results.push({
+        model: candidate.model,
+        provider: '',
+        name: candidate.model,
+        reasoningEffort: candidate.reasoningEffort ?? '',
+        status: 'failed',
+        seconds: 0,
+        text: '',
+        error: error instanceof Error ? error.message : String(error),
+        runId,
+        logPath: '',
+        checks: [],
+        ok: false,
+      });
+    }
+  }
+
+  return {
+    ok: results.length > 0 && results.every((item) => item.ok),
+    groupId: group.groupId,
+    name: group.name,
+    // 实际落盘的场次 mode（CLI 候选是 cli，而不是组级配置的 llm/subagent）。
+    mode: actualModes.size === 1 ? [...actualModes][0] : actualModes.size ? 'mixed' : testMode,
+    testedAt: Date.now(),
+    results,
   };
 }
 
@@ -1354,6 +1506,14 @@ export const Config = z.object({
    * 关掉后只使用 `cliModels` 里显式声明的条目；适合模型太多、只想手选几家的场景。
    */
   discoverCli: z.boolean().default(true),
+
+  /**
+   * CLI 信息缓存文件路径；空 = `$DSH_HOME/model-team/cli-cache.json`。
+   *
+   * 自动发现要起外部进程（本机 8 家一轮 ≈ 2.5 秒），结果落盘后**进设置页只读缓存**；
+   * 只有点设置页的「刷新」才重新探测（`src/harness/cli-cache.js`）。
+   */
+  cliCachePath: z.string().default(''),
 });
 
 /** Host 服务：Client 通过 `ctx.remote.modelTeam` 读账本与周报（A1）。 */
@@ -1404,11 +1564,37 @@ export class ModelTeamService extends TypertRemoteService {
     };
   }
 
-  /** 可选的模型目录（页面下拉框用）。 */
+  /**
+   * 可选的模型目录（页面下拉框用）。
+   *
+   * CLI 部分读的是**落盘缓存**：进页面不起外部进程。要重探走 {@link refreshCli}，
+   * `refreshedAt` 让页面显示「缓存更新于 …」。
+   */
   async catalog() {
     const prefs = readPrefs(await this.ensureStore());
     const models = await listCatalog(this.ctx, this.pluginConfig ?? {}, prefs);
-    return { models };
+    return { models, refreshedAt: cliCacheUpdatedAt() };
+  }
+
+  /**
+   * 重新探测 CLI 信息（设置页的「刷新」按钮）。
+   *
+   * 依次做：清掉可用性 + 发现缓存 → 重新判断本机装好哪些 CLI → 对**全部可用**
+   * harness 重新发现模型（不按当前范围裁剪，这样之后切换范围不会再起进程）→ 重建目录。
+   */
+  async refreshCli() {
+    const prefs = readPrefs(await this.ensureStore());
+    clearCliInfoCache();
+    try {
+      const usable = listHarnesses().filter((definition) => harnessAvailable(definition));
+      await discoverAll(usable, this.ctx.logger, { force: true });
+    } finally {
+      // 探测中途抛错也要把已经拿到的结果落盘，别让下次又从头跑。
+      touchCliCache(Date.now());
+      flushCliCache();
+    }
+    const models = await listCatalog(this.ctx, this.pluginConfig ?? {}, prefs);
+    return { models, harnesses: harnessScopeOptions(), refreshedAt: cliCacheUpdatedAt() };
   }
 
   /** 把 `provider/model@@effort` 解析成模型显示名；解析不到就退回原始串。 */
@@ -1475,6 +1661,8 @@ export class ModelTeamService extends TypertRemoteService {
       candidates,
       enabled: request.enabled !== false,
       order: Number(request.order) || 0,
+      // 执行方式：auto 跟随调用参数；llm/subagent 强制覆盖。未知值归一成 auto。
+      mode: normalizeMode(request.mode),
     });
     return await this.configuration();
   }
@@ -1483,6 +1671,27 @@ export class ModelTeamService extends TypertRemoteService {
   async removeGroup(request) {
     await dropGroup(await this.ensureStore(), String(request?.groupId ?? ''));
     return await this.configuration();
+  }
+
+  /**
+   * 一键测试一个执行组：组内每条厂商路由各跑一次最小请求，并校验落盘数据。
+   *
+   * 关键点：
+   * - 走**正式链路**（`runTeam`），不是另写一套测试调用；
+   * - 强制 `save: true`：测试必须真实写账本 + 会话日志，否则「保存的数据是否符合
+   *   系统要求」无从验证；
+   * - 每条候选单独跑一场（`kind='test'`、独立 runId），这样主备都能被逐一验证，
+   *   而不是主力成功后备选从未被调用；
+   * - 跑完读回账本与会话日志，交给 `validateTestRun` 逐项检查，页面据此显示
+   *   「测试通过」或具体失败项。
+   */
+  async testGroup(request) {
+    const groupId = String(request?.groupId ?? '');
+    const store = await this.ensureStore();
+    if (!store) throw new Error('配置存储不可用（需要 storageDomain）');
+    const group = readGroups(store).find((item) => item.groupId === groupId);
+    if (!group) throw new Error(`找不到执行组：${groupId || '(空)'}`);
+    return await runGroupSelfTest(this.ctx, this.ledger, store, this.pluginConfig, group);
   }
 
   /**
@@ -1674,8 +1883,10 @@ export const REMOTE_METHODS = Object.freeze([
   'settings',
   'configuration',
   'catalog',
+  'refreshCli',
   'saveGroup',
   'removeGroup',
+  'testGroup',
   'setBinding',
   'savePrefs',
   'openReport',
@@ -1721,6 +1932,22 @@ export function apply(ctx, config = {}) {
   // 把「磁盘源码 vs 当前进程」的结论写进日志，免得对着旧行为排查。
   ctx.logger?.info?.(buildInfoLine(ENTRY_LOADED_AT));
 
+  // CLI 信息缓存：自动发现的模型 + 本机可用性都落盘，进设置页只读缓存。
+  // 早先这两份结果只在内存里（发现 30 分钟 / 可用性 30 秒 TTL），插件重载或 DSH 重启就丢，
+  // 于是**每次**打开设置页都要重新起一轮 `pi --list-models` / `opencode models`（本机 ≈2.5s）。
+  // 现在只在缓存为空时探测一次；装/卸 CLI 之后点页面上的「刷新」才重新探测。
+  try {
+    configureCliCache(config.cliCachePath || defaultCliCachePath(dshHome()), { logger: ctx.logger });
+    const cache = cliCacheSummary();
+    ctx.logger?.info?.(cache.updatedAt
+      ? 'model-team: CLI 缓存 ' + cache.file
+        + `（可用 ${cache.available}/${cache.checked} 家，已发现 ${cache.discoveredHarnesses} 家 / ${cache.models} 个模型，`
+        + `更新于 ${new Date(cache.updatedAt).toLocaleString()}）`
+      : `model-team: CLI 缓存 ${cache.file} 为空：首次需要模型目录时探测一次，之后只在设置页点「刷新」才重探`);
+  } catch (error) {
+    ctx.logger?.warn?.(`model-team: CLI 缓存初始化失败（退化为内存缓存）：${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // Remote 三方清单自检：Host 标记 / typert.js / client.js 必须一致。
   // 只改一处是**静默失效**（`stopModel` 漏在 Client 里时按钮恒 undefined，
   // 点了毫无反应；反过来 Client 声明了但 Host 没标记则网关直接 invocation-unavailable）。
@@ -1747,12 +1974,27 @@ export function apply(ctx, config = {}) {
   // 用 bundled rank（最低优先级）：项目/用户目录里的同名技能会压过它。
   registerBundledSkill(ctx);
 
+  // 子代理完成等待：DSH 的 subagent 工具是异步的——工具结果只有 childId，
+  // 真正的结果由运行时通过完成通知送回。模型若在派发后 sleep/轮询，
+  // 就会把通知一直压在 step 边界之后（真机见过 `sleep 300`「等 final gate review」）。
+  // 这里补一条与 jobs 工具同类的系统提示，明确「没有别的工作就结束本回合」。
+  try {
+    const subagentOrder = ctx.systemPrompt?.getSectionOrder?.('TOOL_SUBAGENT');
+    ctx.systemPrompt?.section?.({
+      name: 'tool:subagent-completion',
+      order: Number.isFinite(subagentOrder) ? subagentOrder + 1 : 0,
+      text: 'Subagent delegation is asynchronous. The subagent tool returns a child id; the runtime sends a completion notice with the result. If you have no other independent work while it runs, end your turn instead of sleeping, polling, or repeatedly checking. Do not build a "final gate review" wait loop. A running turn or a long sleep delays the completion notice until the next step boundary.',
+    });
+  } catch (error) {
+    ctx.logger?.warn?.(`model-team: 子代理完成提示注册失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // CLI harness：内置 pi / opencode + 配置里的定义（后者可覆盖前者）。
   // 注册只做校验与登记，不起进程；真正调用在 runCandidate 的 `transport === 'cli'` 分支。
   registerBuiltinHarnesses();
   registerConfiguredHarnesses(ctx, config);
-  // 插件重载时清掉自动发现缓存：否则旧的别名（sonnet/opus）会跨重载存活。
-  try { clearDiscoveryCache(); } catch { /* 老版本没有该导出时忽略 */ }
+  // 不再在重载时清空发现缓存：结果落盘，跨重载复用；定义/命令变了由签名自动失效。
+  // 要强制重探走设置页的「刷新」（Remote `refreshCli`）或删掉 cli-cache.json。
 
   ctx.tools.register({
     name: config.toolName ?? 'model_team',
@@ -1783,7 +2025,8 @@ export function apply(ctx, config = {}) {
             + 'CLI harness models are `cli-<harness>/<id>` (e.g. `cli-pi/k3@@max`). '
             + 'A pick REPLACES the configured entry for the SAME model at the SAME effort (so you can swap which provider '
             + 'route runs it); it does NOT drop the activity bindings, and models absent from the bindings are added as '
-            + 'extra entries. Omit to run exactly what the bindings select.',
+            + 'extra entries. Only pass this when the user explicitly names models to add or override; otherwise omit it '
+            + 'so the configured execution groups run exactly as configured.',
         },
         mode: {
           type: 'string',

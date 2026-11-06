@@ -85,6 +85,34 @@ const groupSchema = z.object({
   candidates: z.array(z.object({ model: z.string(), reasoningEffort: z.string(), speed: z.string().optional() })),
   enabled: z.boolean(),
   order: z.number(),
+  /** auto = 跟随调用参数；llm/subagent = 组级强制。老配置缺省按 auto。 */
+  mode: z.string().optional(),
+});
+
+const testCheckSchema = z.object({
+  id: z.string(), label: z.string(), ok: z.boolean(), detail: z.string(),
+});
+
+const testGroupResult = z.object({
+  ok: z.boolean(),
+  groupId: z.string(),
+  name: z.string(),
+  mode: z.string(),
+  testedAt: z.number(),
+  results: z.array(z.object({
+    model: z.string(),
+    provider: z.string(),
+    name: z.string(),
+    reasoningEffort: z.string(),
+    status: z.string(),
+    seconds: z.number(),
+    text: z.string(),
+    error: z.string(),
+    runId: z.string(),
+    logPath: z.string(),
+    checks: z.array(testCheckSchema),
+    ok: z.boolean(),
+  })),
 });
 
 const prefsSchema = z.object({
@@ -120,21 +148,41 @@ const configResult = z.object({
   ready: z.boolean(),
 });
 
+/** 目录里的一个模型条目；DSH 原生与 CLI harness 共用同一形状。 */
+const catalogModel = z.object({
+  provider: z.string(),
+  id: z.string(),
+  name: z.string(),
+  efforts: z.array(z.string()),
+  defaultEffort: z.string(),
+  speeds: z.array(z.string()).optional(),
+  defaultSpeed: z.string().optional(),
+  // 跨厂商归一键（页面按它把同一逻辑模型的路由聚成一个执行组）。
+  modelKey: z.string().optional(),
+  // `cli` = 外部 CLI harness；缺省 = DSH 原生模型。
+  transport: z.string().optional(),
+  harness: z.string().optional(),
+});
+
 const catalogResult = z.object({
-  models: z.array(z.object({
-    provider: z.string(),
-    id: z.string(),
-    name: z.string(),
-    efforts: z.array(z.string()),
-    defaultEffort: z.string(),
-    speeds: z.array(z.string()).optional(),
-    defaultSpeed: z.string().optional(),
-    // 跨厂商归一键（页面按它把同一逻辑模型的路由聚成一个执行组）。
-    modelKey: z.string().optional(),
-    // `cli` = 外部 CLI harness；缺省 = DSH 原生模型。
-    transport: z.string().optional(),
-    harness: z.string().optional(),
-  })),
+  models: z.array(catalogModel),
+  /** CLI 信息缓存更新时间（毫秒）；0 = 还没探测过（页面显示「未缓存」）。 */
+  refreshedAt: z.number(),
+});
+
+/** 设置页「可用 CLI 范围」的选项（与 Host 的 `harnessScopeOptions()` 同形状）。 */
+const harnessScope = z.object({
+  id: z.string(),
+  label: z.string(),
+  available: z.boolean(),
+  kind: z.string(),
+});
+
+/** 刷新 CLI 后的返回：新目录 + 新的可用性 + 刷新时间。 */
+const refreshCliResult = z.object({
+  models: z.array(catalogModel),
+  harnesses: z.array(harnessScope),
+  refreshedAt: z.number(),
 });
 
 const settingsResult = z.object({
@@ -215,6 +263,20 @@ const $remote = createTypertRemoteInfo({
         jsonSchema: { type: 'object' },
       },
     },
+    'modelTeam/refreshCli': {
+      service: 'modelTeam',
+      description: 'Re-probe local CLI availability and re-discover their models (the settings page Refresh button). '
+        + 'Opening the settings page only reads the on-disk snapshot; only this call spawns the CLI discovery commands.',
+      invocation: { kind: 'direct' },
+      parameters: [],
+      result: {
+        mode: 'strict',
+        typeSymbol: `${PACKAGE}/types#RefreshCli`,
+        create: () => refreshCliResult,
+        description: 'Fresh model catalog, CLI scope options and the refresh timestamp.',
+        jsonSchema: { type: 'object' },
+      },
+    },
     'modelTeam/saveGroup': {
       service: 'modelTeam',
       description: 'Create or replace one execution group (candidates[0] is the primary; the rest are fallbacks in order).',
@@ -259,6 +321,37 @@ const $remote = createTypertRemoteInfo({
         typeSymbol: `${PACKAGE}/types#Config`,
         create: () => configResult,
         description: 'Configuration after the delete.',
+        jsonSchema: { type: 'object' },
+      },
+    },
+    'modelTeam/testGroup': {
+      service: 'modelTeam',
+      description: 'Run a one-click end-to-end test for one execution group and validate the persisted ledger/session data.',
+      invocation: { kind: 'direct' },
+      parameters: [
+        {
+          name: 'request',
+          wire: 'request',
+          description: 'The group id to test.',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: `${PACKAGE}/types#TestGroupRequest`,
+            create: () => z.object({ groupId: z.string() }),
+            jsonSchema: {
+              type: 'object',
+              properties: { groupId: { type: 'string' } },
+              required: ['groupId'],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: `${PACKAGE}/types#TestGroupResult`,
+        create: () => testGroupResult,
+        description: 'Per-route test outcomes and data-validation checks.',
         jsonSchema: { type: 'object' },
       },
     },

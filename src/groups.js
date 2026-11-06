@@ -23,6 +23,15 @@ const candidateSchema = z.object({
   speed: z.string().optional(),
 });
 
+/** 执行方式：auto = 跟随调用参数；llm = 强制直接调用；subagent = 强制子代理。 */
+export const EXECUTION_MODES = Object.freeze(['auto', 'llm', 'subagent']);
+
+/** 归一化执行方式；未知值（含老配置缺失）一律回落到 auto。 */
+export function normalizeMode(value) {
+  const mode = String(value ?? '').trim();
+  return EXECUTION_MODES.includes(mode) ? mode : 'auto';
+}
+
 /** 一个执行组。 */
 const groupSchema = z.object({
   /** 组 id（稳定标识，页面按它增删）。 */
@@ -35,6 +44,11 @@ const groupSchema = z.object({
   enabled: z.boolean(),
   /** 排序权重，小的在前。 */
   order: z.number(),
+  /**
+   * 执行方式；`auto` = 跟随 `model_team` 的 `mode` 参数（旧行为）。
+   * 用 string 而不是 enum：老记录没有这个字段，读入后由 {@link readGroups} 归一。
+   */
+  mode: z.string().optional(),
 });
 
 /** 配置域：一个 `groups` 表 + 一个 `prefs` 表（总结模型等）。 */
@@ -142,11 +156,11 @@ export async function openConfig(ctx) {
   }
 }
 
-/** 读全部执行组，按 `order` 升序。 */
+/** 读全部执行组，按 `order` 升序；老记录缺 `mode` 时补 `auto`。 */
 export function readGroups(config) {
   if (!config) return [];
   return [...config.table('groups').entries()]
-    .map(([, group]) => group)
+    .map(([, group]) => ({ ...group, mode: normalizeMode(group?.mode) }))
     .sort((left, right) => left.order - right.order || left.groupId.localeCompare(right.groupId));
 }
 
