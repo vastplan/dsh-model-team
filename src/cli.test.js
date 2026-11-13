@@ -158,3 +158,49 @@ test('summaryReport：按模型汇总', async () => {
     assert.equal(report.models[0].severity, 5);
   });
 });
+
+test('planFromDsh：按绑定取组，保持组内候选顺序', async () => {
+  const { planFromDsh } = await import('./cli/dsh-config.js');
+  const config = {
+    groups: [
+      { groupId: 'g1', name: 'A', enabled: true, order: 1, candidates: [
+        { model: 'cli-claude/claude-opus-5-5', reasoningEffort: 'xhigh' },
+        { model: 'cli-devin/claude-opus-5-5', reasoningEffort: 'xhigh' },
+      ] },
+      { groupId: 'g2', name: 'B', enabled: true, order: 0, candidates: [
+        { model: 'magpie-anthropic/zcode/GLM-5.3-Flash', reasoningEffort: 'max' },
+        { model: 'cli-devin/swe-2', reasoningEffort: 'max' },
+      ] },
+      { groupId: 'g3', name: 'C', enabled: false, order: 2, candidates: [{ model: 'cli-grok/grok-4-7' }] },
+    ],
+    bindings: { audit: ['g1', 'g2'] },
+    prefs: {},
+  };
+  const catalog = [
+    { provider: 'cli-claude', id: 'claude-opus-5-5' },
+    { provider: 'cli-devin', id: 'claude-opus-5-5' },
+    { provider: 'cli-devin', id: 'swe-2' },
+    { provider: 'cli-grok', id: 'grok-4-7' },
+  ];
+  const { groups, skipped } = planFromDsh(config, 'audit', catalog);
+  assert.deepEqual(groups.map((group) => group.groupId), ['g1', 'g2'], '按绑定顺序，且跳过停用组');
+  assert.deepEqual(groups[0].candidates, ['cli-claude/claude-opus-5-5@@xhigh', 'cli-devin/claude-opus-5-5@@xhigh']);
+  assert.deepEqual(groups[1].candidates, ['cli-devin/swe-2@@max'], 'DSH 原生路由要被跳过');
+  assert.equal(skipped.length, 1);
+  assert.match(skipped[0].reason, /CLI 目录/);
+});
+
+test('planFromDsh：没有绑定时退回全部启用组', async () => {
+  const { planFromDsh } = await import('./cli/dsh-config.js');
+  const config = {
+    groups: [
+      { groupId: 'g1', name: 'A', enabled: true, order: 0, candidates: [{ model: 'cli-grok/grok-4-7' }] },
+      { groupId: 'g3', name: 'C', enabled: false, order: 2, candidates: [{ model: 'cli-claude/claude-sonnet-5-5' }] },
+    ],
+    bindings: {},
+    prefs: {},
+  };
+  const catalog = [{ provider: 'cli-grok', id: 'grok-4-7' }, { provider: 'cli-claude', id: 'claude-sonnet-5-5' }];
+  const { groups } = planFromDsh(config, 'design', catalog);
+  assert.deepEqual(groups.map((group) => group.groupId), ['g1']);
+});

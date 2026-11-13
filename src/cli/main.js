@@ -69,14 +69,46 @@ export async function main(argv) {
       case 'run': {
         const { runCliTeam, readPacket } = await import('./run.js');
         const { buildCliCatalog } = await import('./catalog.js');
+        const { readDshConfig, planFromDsh } = await import('./dsh-config.js');
         const { listFlag, flagOf, hasFlag, numberFlag } = await import('./args.js');
         const { catalog } = await buildCliCatalog(config, { quiet: hasFlag(parsed, '--quiet') });
+        const kind = flagOf(parsed, '--kind', 'audit');
+        const models = listFlag(parsed, '--models');
+        const groupFilter = listFlag(parsed, '--group');
+        const source = flagOf(parsed, '--source', 'auto');
+        const dsh = source === 'file' ? { exists: false } : readDshConfig(flagOf(parsed, '--dsh-config'));
+        let plan = null;
+        let rosterSource = 'models';
+        if (!models.length && dsh.exists) {
+          const resolved = planFromDsh(dsh, kind, catalog, { groupIds: groupFilter });
+          if (resolved.skipped.length && !hasFlag(parsed, '--quiet')) {
+            for (const item of resolved.skipped) process.stderr.write(`跳过 ${item.group || '(组)'}：${item.model || '-'}（${item.reason}）\n`);
+          }
+          if (resolved.groups.length) {
+            plan = resolved.groups;
+            rosterSource = `dsh:${dsh.path}`;
+          }
+        }
+        if (!plan && !models.length && !config.defaultModels.length) {
+          throw new Error('没有可用名单：页面里没有绑定/启用的执行组，cli.json 也没有 defaultModels；请用 --models 指定');
+        }
+        // `--plan-only`：只打印解析出的执行计划，不调模型（排查「没按设置跑」用）。
+        if (hasFlag(parsed, '--plan-only')) {
+          const preview = plan
+            ?? (models.length
+              ? [{ groupId: '', name: '(命令行点名)', candidates: models }]
+              : [{ groupId: '', name: '(cli.json 默认名单)', candidates: config.defaultModels }]);
+          process.stdout.write(`${JSON.stringify({ roster_source: rosterSource, groups: preview }, null, 2)}\n`);
+          return 0;
+        }
         const packet = readPacket(flagOf(parsed, '--packet'));
         const outcome = await runCliTeam({
-          kind: flagOf(parsed, '--kind', 'audit'),
+          kind,
           packet,
           slice: flagOf(parsed, '--slice'),
-          models: listFlag(parsed, '--models'),
+          models,
+          plan,
+          rosterSource,
           fallback: config.defaultModels,
           catalog,
           workspace: flagOf(parsed, '--workspace', process.cwd()),

@@ -118,13 +118,34 @@ export async function runCliTeam(options) {
   }
   const kind = String(options.kind ?? 'audit').trim() || 'audit';
   if (!CLI_KINDS[kind]) throw new Error(`未知 --kind：${kind}（可用 audit | design | reason）`);
-  const models = Array.isArray(options.models) ? options.models : [];
-  const fallback = Array.isArray(options.fallback) ? options.fallback : [];
-  if (!models.length && !fallback.length) {
-    throw new Error('没有指定模型：请用 --models a,b，或在配置文件里写 defaultModels');
+  const catalog = options.catalog ?? [];
+
+  // 执行计划：**优先用页面里的执行组**（含组内主备回落），否则退回 --models / 配置默认名单。
+  const explicitPlan = Array.isArray(options.plan) && options.plan.length ? options.plan : null;
+  let plan;
+  if (explicitPlan) {
+    plan = explicitPlan.map((group) => {
+      const entries = [];
+      for (const spec of group.candidates ?? []) {
+        try {
+          const [entry] = resolveTeam([spec], catalog, []);
+          if (entry) entries.push(entry);
+        } catch {
+          // 解析不到的候选跳过（调用方已提示）
+        }
+      }
+      return { ...group, entries };
+    }).filter((group) => group.entries.length);
+  } else {
+    const models = Array.isArray(options.models) ? options.models : [];
+    const fallback = Array.isArray(options.fallback) ? options.fallback : [];
+    if (!models.length && !fallback.length) {
+      throw new Error('没有指定模型：请用 --models，或让页面里存在绑定/启用的执行组');
+    }
+    plan = resolveTeam(models, catalog, fallback)
+      .map((entry) => ({ groupId: '', name: entry.name, candidates: [], entries: [entry] }));
   }
-  const team = resolveTeam(models, options.catalog ?? [], fallback);
-  if (!team.length) throw new Error('名单解析后没有可跑的模型');
+  if (!plan.length) throw new Error('执行计划为空：页面的执行组里没有 CLI 可跑的候选');
 
   const workspace = String(options.workspace ?? '').trim();
   if (!workspace || !isAbsolute(workspace)) {
@@ -147,18 +168,17 @@ export async function runCliTeam(options) {
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   const emit = (event) => { try { progress(event); } catch { /* 进度不能带崩执行 */ } };
 
-  const rows = await Promise.all(team.map(async (entry) => {
+  /** 跑单个候选。 */
+  const runOne = async (entry) => {
     const label = joinEffort(`${entry.provider}/${entry.model}`, entry.reasoningEffort);
     emit({ type: 'start', model: label, tool: entry.harness ?? 'cli' });
     const t0 = Date.now();
     let result = null;
     let error = '';
-    // 每家一个临时目录，用完**只删这一家**（不要碰 tmpdir 根）。
     const tmpDir = mkdtempSync(join(tmpdir(), 'model-team-'));
     try {
-      const def = harnessFor(entry.harness);
       result = await runHarness({
-        def,
+        def: harnessFor(entry.harness),
         entry: {
           harnessModel: entry.harnessModel ?? entry.model,
           harnessProvider: entry.harnessProvider,
@@ -176,14 +196,12 @@ export async function runCliTeam(options) {
       try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
     }
     const seconds = Math.round((Date.now() - t0) / 100) / 10;
-    const finishedAt = Date.now();
     const text = String(result?.text ?? '');
     const status = error ? 'failed' : (text.trim() ? 'done' : 'no-result');
     let logPath = '';
     if (result) {
       try {
         logPath = writeSessionLog(runDir, {
-          // 用完整 spec（provider/id）：账本 calls.model 也是这个口径，backfill 才对得上。
           model: `${entry.provider}/${entry.model}`,
           provider: entry.provider,
           reasoningEffort: entry.reasoningEffort,
@@ -197,15 +215,13 @@ export async function runCliTeam(options) {
           messages: result.messages ?? [],
           usage: result.usage ?? {},
           started,
-          finished: localStamp(new Date(finishedAt)),
+          finished: localStamp(new Date()),
           durationS: seconds,
         });
       } catch (caught) {
-        // 日志写失败不推翻结果，但必须留痕——早先静默吞掉，backfill 面对空目录查不出原因。
         process.stderr.write(`会话日志写入失败：${caught instanceof Error ? caught.message : String(caught)}\n`);
       }
     }
-    emit({ type: 'done', model: label, status, seconds });
     return {
       model: entry.model,
       provider: entry.provider,
@@ -218,7 +234,28 @@ export async function runCliTeam(options) {
       seconds,
       usage: result?.usage ?? {},
       logPath,
+      groupId: '',
     };
+  };
+
+  // 每个执行组内部按候选顺序回落：第一个有结果的即停（与插件页语义一致）。
+  const rows = await Promise.all(plan.map(async (group) => {
+    const tried = [];
+    let winner = null;
+    for (const entry of group.entries) {
+      const row = await runOne(entry);
+      tried.push({
+        model: `${entry.provider}/${entry.model}`,
+        effort: entry.reasoningEffort ?? '',
+        status: row.status,
+        seconds: row.seconds,
+      });
+      winner = row;
+      if (row.status === 'done') break;
+    }
+    const result = { ...winner, groupId: group.groupId ?? '', groupName: group.name ?? '', tried };
+    emit({ type: 'done', model: `${result.provider}/${result.model}`, status: result.status, seconds: result.seconds, group: result.groupName });
+    return result;
   }));
 
   const finishedAt = Date.now();
@@ -243,12 +280,12 @@ export async function runCliTeam(options) {
       messages: [],
       logPath: row.logPath,
       tool: row.harness,
+      groupId: row.groupId,
     })));
   } catch (caught) {
     process.stderr.write(`账本写入失败（结果仍有效）：${caught instanceof Error ? caught.message : String(caught)}\n`);
   }
   // 同时写旧技能的 `review_session`：record-findings / summary 都按这张表取名单。
-  // 表不存在（新机器没跑过旧 skill）就静默跳过——不是所有部署都有旧表。
   try {
     writeReviewSessions(ledger, {
       runId, kind, slice: String(options.slice ?? ''), commit: String(options.commit ?? ''), rows,
@@ -266,8 +303,11 @@ export async function runCliTeam(options) {
     ledger: ledgerPath,
     log_dir: runDir,
     quality_eval: '未评',
+    roster_source: String(options.rosterSource ?? 'models'),
     next: `model-team record-findings --run-id ${runId} --json /tmp/findings.json --write`,
     runs: rows.map((row) => ({
+      group: row.groupName || '',
+      tried: row.tried ?? [],
       model: `${row.provider}/${row.model}`,
       provider: row.provider,
       name: row.name,

@@ -34,7 +34,23 @@ node /path/to/dsh-plugins/model-team/cli.js --help
 }
 ```
 
-`defaultModels` 省略时，`run` **必须**用 `--models` 显式点名（不会默认跑全目录）。
+`defaultModels` 只在**页面没有可用执行组**时兜底。
+
+### 模型来源优先级
+
+1. `--models` 命令行点名；
+2. `--group <id|名字>` 只跑某个执行组；
+3. **DSH 页面配置**（`$DSH_HOME/storages/model_team_config.json`）：按 `--kind` 取绑定的执行组，
+   组内候选按顺序回落、停用组跳过——与插件页同一套语义；
+4. `~/.model-team/cli.json` 的 `defaultModels`。
+
+排查用 `--plan-only`（不调模型）：
+
+```bash
+model-team run --kind audit --plan-only
+```
+
+输出 `roster_source` 与每个组的候选列表。
 
 ## 子命令
 
