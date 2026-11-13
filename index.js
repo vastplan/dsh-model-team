@@ -27,7 +27,7 @@ import {
   clearCliInfoCache, cliCacheSummary, cliCacheUpdatedAt, cliCatalogEntries, configureCliCache,
   defaultCliCachePath, discoverAll, flushCliCache, harnessFor, listHarnesses,
   registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness, touchCliCache,
-} from './src/harness/index.js?v=0.7.2';
+} from './src/harness/index.js?v=0.7.3';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
 import {

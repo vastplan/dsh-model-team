@@ -143,8 +143,11 @@ export function resolveTeam(selection, catalog, fallback = []) {
     team.push(resolved);
   }
   if (unknown.length) {
-    const available = catalog.map((entry) => `${entry.provider}/${entry.id}`).join(', ') || '（无已注册模型）';
-    throw new Error(`名单里有模型不在 DSH 已注册路由里：${unknown.join(', ')}；可用：${available}`);
+    // 目录可能有几百条：整串铺开会把报错刷成一屏（真机 600+ 条），这里只列前 60 条。
+    const all = catalog.map((entry) => `${entry.provider}/${entry.id}`);
+    const shown = all.slice(0, 60).join(', ') || '（无已注册模型）';
+    const more = all.length > 60 ? ` …等 ${all.length} 个` : '';
+    throw new Error(`名单里有模型不在已注册路由里：${unknown.join(', ')}；可用：${shown}${more}`);
   }
   return team;
 }

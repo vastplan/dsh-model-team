@@ -11,7 +11,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { parseOutput } from './parse.js';
+import { parseOutput } from './parse.js?v=0.7.3';
 import { createPhaseEmitter } from './phases.js';
 import { buildLaunch } from './protocol.js';
 
@@ -206,6 +206,18 @@ export async function runHarness(options) {
   if (exitCode !== 0) {
     const detail = tail(stderr) || tail(outcome?.error?.message) || `退出码 ${exitCode}`;
     const error = new Error(`${def.label} 调用失败：${detail}`);
+    error.partialText = text;
+    error.messages = messages;
+    error.usage = usage;
+    error.exitCode = exitCode;
+    error.stopNote = stopNote;
+    throw error;
+  }
+
+  // 有些 CLI（agy）失败时**退出码仍是 0**，错误只写在结果事件里：
+  // 只看退出码会把「区域不支持 / 未登录」记成成功，正文空着进账本。
+  if (parsed.error) {
+    const error = new Error(`${def.label} 调用失败：${String(parsed.error)}`);
     error.partialText = text;
     error.messages = messages;
     error.usage = usage;

@@ -20,10 +20,10 @@ import { fileURLToPath } from 'node:url';
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** 解析方言。`auto` = 按事件形状识别（`parse.js` 的能力），`text` = 纯文本。 */
-const PARSERS = new Set(['auto', 'jsonl', 'text', 'pi', 'opencode']);
+const PARSERS = new Set(['auto', 'jsonl', 'text', 'pi', 'opencode', 'agy']);
 
 /** 自动发现模型列表的解析器。 */
-const DISCOVER_PARSERS = new Set(['lines', 'opencode', 'id-dash-name', 'bullet', 'devin-table', 'devin-json', 'qoder-table']);
+const DISCOVER_PARSERS = new Set(['lines', 'opencode', 'id-dash-name', 'bullet', 'devin-table', 'devin-json', 'qoder-table', 'tab-name']);
 
 /** 通用思考档；具体 CLI 可用 `thinking.values` 收窄。 */
 const DEFAULT_THINKING_VALUES = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];

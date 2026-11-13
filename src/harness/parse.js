@@ -708,8 +708,60 @@ export function unmappedEventTypes(events) {
     }
     return { unknown: [...unknown].sort(), markers: [...markers].sort() };
 }
+/**
+ * agy（Antigravity CLI）stream-json：事件用 `event` 字段而不是 `type`：
+ *   {"event":"init",...} / {"event":"step_update",...} / {"event":"result","result":{...}}
+ *
+ * 正文在 `result.response`；用量在 `result.usage`（snake_case，`thinking_tokens` 是思考）。
+ * **退出码恒为 0**：失败时 `status=ERROR` 且 `response` 为空、`error` 带原因——
+ * 只看退出码会把「区域不支持」「未登录」当成功。
+ *
+ * @returns 命中 agy 事件流时返回结果；不是 agy 输出返回 null（交给通用解析）。
+ */
+export function parseAgyOutput(raw) {
+    // 廉价前置判断：没有 `event` 字段的流一定不是 agy，别让每份输出都多解析一遍。
+    if (!String(raw ?? "").includes('"event"'))
+        return null;
+    const events = eventsFromRaw(raw);
+    const results = [];
+    for (const ev of events) {
+        if (String(ev.event ?? "") !== "result")
+            continue;
+        if (ev.result && typeof ev.result === "object")
+            results.push(ev.result);
+    }
+    if (!results.length)
+        return null;
+    const last = results[results.length - 1];
+    const usage = {};
+    const rawUsage = last.usage && typeof last.usage === "object" ? last.usage : {};
+    const usageMap = {
+        input_tokens: "input",
+        output_tokens: "output",
+        thinking_tokens: "reasoning",
+        cache_read_tokens: "cache_read",
+        cache_write_tokens: "cache_write",
+    };
+    for (const [from, to] of Object.entries(usageMap)) {
+        const value = asInt(rawUsage[from]);
+        if (value !== null)
+            usage[to] = value;
+    }
+    const status = String(last.status ?? "").trim();
+    const text = String(last.response ?? "").trim();
+    // 只有明确 ERROR 才当失败：status 缺失的旧版本按成功处理（正文有就用正文）。
+    const error = status.toUpperCase() === "ERROR"
+        ? (String(last.error ?? "").trim() || "agy 返回 ERROR（未给原因）")
+        : "";
+    return { text, usage, error, cost: {}, messages: [], unmapped: [], markers: [], status };
+}
+
 /** 与 Python `parse_output` 同义：正文 + 用量 + 成本 + 会话消息。 */
 export function parseOutput(raw, aggregate = "auto") {
+    // agy 的事件形状与通用分类器不兼容（用 event 而非 type），先按形状认领。
+    const agy = parseAgyOutput(raw);
+    if (agy)
+        return agy;
     const answers = [];
     const finals = [];
     let sessionAnswer = "";

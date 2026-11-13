@@ -296,11 +296,11 @@ test('runTeam：可用范围关掉 dsh 后，点名 DSH 模型直接拒绝', asy
   );
 });
 
-test('内置 9 家 harness 全部注册', () => {
+test('内置 10 家 harness 全部注册', () => {
   freshRegistry();
   assert.deepEqual(
     listHarnesses().map((item) => item.id),
-    ['agent', 'claude', 'cline', 'devin', 'grok', 'opencode', 'pi', 'qoder', 'zcode'],
+    ['agent', 'agy', 'claude', 'cline', 'devin', 'grok', 'opencode', 'pi', 'qoder', 'zcode'],
   );
 });
 
@@ -485,6 +485,14 @@ test('discover 解析器', () => {
     parseDiscovery('qoder-table', 'MODEL\nAuto\nQwen3.8-Max').map((item) => item.id),
     ['Auto', 'Qwen3.8-Max'],
   );
+  // agy models：`<id>\t<显示名>`，无 tab 的噪声行（进度提示）必须跳过。
+  assert.deepEqual(
+    parseDiscovery('tab-name', 'Fetching available models...\ngemini-4-carbon-medium\tGemini 4 Carbon (Medium)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)'),
+    [
+      { id: 'gemini-4-carbon-medium', name: 'Gemini 4 Carbon (Medium)' },
+      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+    ],
+  );
 });
 
 test('Devin JSON：family 与 thinking/speed 分开', () => {
@@ -598,4 +606,54 @@ test('Grok streaming-json：thought/text 进入进度窗', () => {
   assert.equal(last, 'answering');
   assert.match(emitter.body, /OK/);
   assert.match(emitter.thoughts, /想一想/);
+});
+
+test('agy argv：提示词紧跟 -p，只读 plan 档', () => {
+  freshRegistry();
+  const argv = buildLaunch(
+    harnessFor('agy'),
+    { harnessModel: 'gemini-4-carbon-medium' },
+    'PROMPT',
+    { workspace: '/ws', tmpDir: '/tmp/mt' },
+  ).argv;
+  assert.deepEqual(argv, [
+    'agy', '-p', 'PROMPT', '--output-format', 'stream-json',
+    '--mode', 'plan', '--model', 'gemini-4-carbon-medium',
+  ]);
+});
+
+test('agy stream-json：正文与 snake_case 用量', () => {
+  const raw = [
+    JSON.stringify({ event: 'init', conversation_id: 'c1', init: { model: 'gemini-4-carbon-medium', cwd: '/ws' } }),
+    JSON.stringify({ event: 'step_update', step_update: { step_index: 0, state: 'DONE' } }),
+    JSON.stringify({
+      event: 'result',
+      result: {
+        conversation_id: 'c1',
+        status: 'SUCCESS',
+        response: 'OK-SELFTEST',
+        duration_seconds: 2,
+        num_turns: 1,
+        usage: { input_tokens: 120, output_tokens: 7, thinking_tokens: 3, cache_read_tokens: 40, total_tokens: 170 },
+      },
+    }),
+  ].join('\n');
+  const out = parseOutput(raw, 'take-last');
+  assert.equal(out.text, 'OK-SELFTEST');
+  assert.deepEqual(out.usage, { input: 120, output: 7, reasoning: 3, cache_read: 40 });
+});
+
+test('agy stream-json：status=ERROR 时 error 带原因（退出码仍是 0）', () => {
+  const raw = JSON.stringify({
+    event: 'result',
+    result: {
+      status: 'ERROR',
+      response: '',
+      error: 'FAILED_PRECONDITION (code 400): User location is not supported for the API use.',
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  });
+  const out = parseOutput(raw, 'take-last');
+  assert.equal(out.text, '');
+  assert.match(out.error, /User location is not supported/);
 });

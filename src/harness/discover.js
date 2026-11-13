@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 
 import { harnessAvailable } from './availability.js';
 import { clearCachedDiscovery, getCachedDiscovery, setCachedDiscovery } from './cli-cache.js';
-import { fill } from './protocol.js?v=0.7.2';
+import { fill } from './protocol.js?v=0.7.3';
 
 const execFileAsync = promisify(execFile);
 const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -146,6 +146,20 @@ export function parseDiscovery(parser, text) {
       // 形如：`  swe-2-high   SWE-2 High  [262K context, Free]`
       const match = /^\s{2,}([a-z0-9][a-z0-9._-]*)\s{2,}(.+?)(?:\s{2,}\[|$)/.exec(line);
       if (match) push(match[1], match[2]);
+    }
+    return out;
+  }
+
+  if (parser === 'tab-name') {
+    // `<id>\t<显示名>`（agy `models` 这类）。**必须带 tab**：无 tab 的行是进度噪声
+    // （如 `Fetching available models...`），当成模型会把脏数据写进目录。
+    for (const line of lines) {
+      if (!line.includes('\t')) continue;
+      const [idPart, ...rest] = line.split('\t');
+      const id = String(idPart ?? '').trim();
+      if (!id) continue;
+      const name = rest.join(' ').trim() || id;
+      out.push({ id, name });
     }
     return out;
   }

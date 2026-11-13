@@ -182,6 +182,21 @@ node scripts/migrate-unified-ledger.mjs --write    # 备份后合并到技能账
         cliCachePath: ''    # CLI 信息缓存；默认 $DSH_HOME/model-team/cli-cache.json（进设置页只读它，点「刷新 CLI」才重探）
 ```
 
+## 命令行（给其他 agent 用）
+
+除了 DSH 会话内的 `model_team` 工具，插件还提供了**独立 CLI**，不依赖 DSH、只走 CLI harness：
+
+```bash
+model-team run --kind audit --packet /tmp/packet.md --slice order-service \
+  --models cli-claude/claude-sonnet-5-5,cli-grok/grok-4-7 --workspace /abs/path/to/repo
+model-team record-findings --run-id <run_id> --json /tmp/findings.json --write
+model-team doctor      # harness 就绪探测（只读、不耗 token）
+model-team summary     # 按模型汇总质量
+```
+
+与插件共用同一本账（`~/.model-team/ledger/model-audit-reviews.db`）和会话日志（`~/.model-team/runs/`）。
+完整命令与输出字段见 [docs/cli.md](docs/cli.md)。
+
 ## CLI Harness（可选）
 
 除了 DSH 已注册模型，插件内置了 9 家 CLI harness 定义：

@@ -410,8 +410,49 @@ export const GROK_HARNESS = {
   probe: { args: ['--version'], classify: 'exit0' },
 };
 
+/**
+ * agy（Antigravity CLI）：`agy -p <prompt> --output-format stream-json`。
+ *
+ * **提示词必须紧跟 `-p`**（`-p` 取下一个 argv 当提示词，否则会把 `--output-format` 吃掉），
+ * 所以和 grok 一样用 `prompt.via: none` 把 `{prompt}` 写进 args。
+ *
+ * 只读：`--mode plan`（计划模式，不落改文件/执行命令）。
+ * **不能加 `--disable-slash-commands`**：它与 `--mode plan` 互斥，CLI 直接报错退出。
+ *
+ * 强度档写在模型 id 里（`gemini-4-carbon-medium`），没有独立 `--effort` 参数——
+ * 所以不做 thinking 下拉，直接按 id 选变体。
+ *
+ * **注意**：`agy` 失败时**退出码不一定是 0**（区域限制会退 3），错误也可能只写在
+ * 结果事件的 `status/error` 里；两条路径都要判，否则空正文会被记成成功。
+ *
+ * **地区限制（2026-11 真机实测，CN 网络）**：
+ * - 可用：`claude-opus-5-5-*` / `claude-sonnet-5-5-*` / `gpt-oss-120b-*`（status=SUCCESS，约 2s）
+ * - 不可用：全部 `gemini-*`（`FAILED_PRECONDITION (400): User location is not supported`）
+ * 这不是集成问题；换网络/账号后 Gemini 会自动恢复，所以模型列表照常全量发现。
+ *
+ * 单次调用有固定开销：即便一句「回 OK」，input 也在 8k~16k token（CLI 自带系统提示与工具表）。
+ */
+export const AGY_HARNESS = {
+  id: 'agy',
+  label: 'agy',
+  command: 'agy',
+  // 不能加 `--disable-slash-commands`：与 `--mode plan` 互斥，CLI 会直接报错退出（真机踩过）。
+  args: [
+    '-p', '{prompt}', '--output-format', 'stream-json',
+    '--mode', 'plan', '--model', '{model}',
+  ],
+  prompt: { via: 'none' },
+  output: { parser: 'agy' },
+  usage: { source: 'stream', aggregate: 'take-last' },
+  capabilities: { readOnlyByDefault: true, streamsUsage: true },
+  discover: { argv: ['models'], parser: 'tab-name' },
+  availability: { fallbacks: ['~/.local/bin/agy'] },
+  probe: { args: ['--version'], classify: 'exit0' },
+};
+
 export const BUILTIN_HARNESSES = [
   AGENT_HARNESS,
+  AGY_HARNESS,
   CLAUDE_HARNESS,
   PI_HARNESS,
   ZCODE_HARNESS,
