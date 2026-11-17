@@ -345,6 +345,10 @@ model-team summary     # 按模型汇总质量
 - 周报与报告依赖「保存数据」总开关；关着时明确报错，不生成空报告。
 - CLI harness 的 token 用量取决于该 CLI 的事件流；拿不到时按未采集记 0（与 subagent 同口径）；
   CLI 未安装/未登录会在该行失败，并带上 stderr 尾部。
+- **审查点只在两套新实现里**：DSH 插件（`src/review-points.js` + `model_team` 工具）与本插件的
+  `model-team` CLI。`development/skill-project/model-team` 那套独立的 TypeScript CLI
+  （`node dist/cli.js`，供其他 harness 用）**没有**这个机制，它的 SKILL.md 也没有写——
+  要给它加，得先在那套实现里落代码，不能只补文档。
 
 ## 目录结构
 

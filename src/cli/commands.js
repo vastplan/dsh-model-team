@@ -176,6 +176,20 @@ export async function dispatchExtra(command, parsed, config) {
   const dbPath = flagOf(parsed, '--db', config.ledgerPath);
   const pretty = (value) => { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); return 0; };
 
+  if (command === 'review-point') {
+    const rp = await import('../review-points.js');
+    const workspace = flagOf(parsed, '--workspace', process.cwd());
+    const file = rp.resolveReviewPointPath(workspace);
+    const sub = parsed.positionals[0] ?? 'show';
+    if (sub === 'reset' || sub === 'clear') {
+      const removed = rp.clearReviewPoint(file, workspace);
+      return pretty({ workspace, file, cleared: removed });
+    }
+    if (sub !== 'show') throw new Error(`未知子命令：review-point ${sub}（show | reset）`);
+    const point = rp.getReviewPoint(file, workspace);
+    const delta = rp.computeReviewDelta(workspace, point?.commit);
+    return pretty({ workspace, file, point, delta: { ...delta, files: delta.files.length, commits: delta.commits.length } });
+  }
   if (command === 'record-findings') {
     const result = ledger.recordFindings({
       runId: flagOf(parsed, '--run-id'),

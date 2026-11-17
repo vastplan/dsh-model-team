@@ -12,13 +12,17 @@ const HELP = `model-team —— 多模型团队命令行（独立于 DSH，只�
   run                跑一场多模型审计/分叉/推理
                      --kind audit|design|reason  --packet <file|->  --slice <名字>
                      --models a,b  --workspace <绝对路径>  --commit <sha>
-                     --timeout <秒>  --json（默认就是 JSON）
+                     --timeout <秒>  --review-point auto|reset|off  --json（默认就是 JSON）
 
 评估闭环
   record-findings    记录对照结论（--run-id <id> --json <file> [--write]）
   record-outcome     记录用户选择/契合分（--run-id <id> --json <file> [--write]）
   summary            汇总各模型表现（--kind audit|design|reason [--json]）
   selfcheck          账本/日志一致性自检（[--json]）
+
+审查点（审计增量游标，存于 <workspace>/.model-team/review-points.json）
+  review-point show   查看当前审查点与下次增量范围（[--workspace <dir>]）
+  review-point reset  清除审查点，下次审计退回全量（[--workspace <dir>]）
 
 账本维护
   normalize          模型名归一（[--write]）
@@ -102,16 +106,36 @@ export async function main(argv) {
           return 0;
         }
         const packet = readPacket(flagOf(parsed, '--packet'));
+        // 审查点：与 DSH 侧的 `model_team` 工具同一套存储与语义，只对 audit 生效。
+        const workspace = flagOf(parsed, '--workspace', process.cwd());
+        const reviewMode = String(flagOf(parsed, '--review-point', 'auto')).trim().toLowerCase();
+        let reviewPlan = null;
+        let packetInScope = packet;
+        if (kind === 'audit' && workspace && reviewMode !== 'off') {
+          const { buildReviewScope, clearReviewPoint, computeReviewDelta, getReviewPoint, resolveReviewPointPath } =
+            await import('../review-points.js');
+          const file = resolveReviewPointPath(workspace);
+          if (reviewMode === 'reset') clearReviewPoint(file, workspace);
+          const point = reviewMode === 'reset' ? null : getReviewPoint(file, workspace);
+          const delta = computeReviewDelta(workspace, point?.commit);
+          packetInScope = `${packet}\n${buildReviewScope(delta, point)}`;
+          reviewPlan = { file, workspace, delta };
+          if (!hasFlag(parsed, '--quiet')) {
+            process.stderr.write(delta.comparable
+              ? `◎ 审查点 ${delta.since.slice(0, 7)} → ${delta.head.slice(0, 7)}：${delta.commits.length} 个提交 / ${delta.files.length} 个文件\n`
+              : `◎ 全量审查（${delta.reason}）\n`);
+          }
+        }
         const outcome = await runCliTeam({
           kind,
-          packet,
+          packet: packetInScope,
           slice: flagOf(parsed, '--slice'),
           models,
           plan,
           rosterSource,
           fallback: config.defaultModels,
           catalog,
-          workspace: flagOf(parsed, '--workspace', process.cwd()),
+          workspace,
           timeoutSec: numberFlag(parsed, '--timeout'),
           ledgerPath: flagOf(parsed, '--db', config.ledgerPath),
           runsRoot: config.runsRoot,
@@ -121,6 +145,18 @@ export async function main(argv) {
             if (event.type === 'done') process.stderr.write(`  ${event.status === 'done' ? '✔' : '✘'} ${event.model} ${event.seconds}s\n`);
           },
         });
+        if (reviewPlan && reviewPlan.delta?.head && outcome.runs?.some((run) => run.status === 'done')) {
+          const { advanceReviewPoint } = await import('../review-points.js');
+          try {
+            advanceReviewPoint({
+              file: reviewPlan.file,
+              workspace: reviewPlan.workspace,
+              delta: reviewPlan.delta,
+              runId: outcome.run_id,
+              commit: reviewPlan.delta.head,
+            });
+          } catch { /* 审查点写不进去不影响本次结果 */ }
+        }
         process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
         return 0;
       }

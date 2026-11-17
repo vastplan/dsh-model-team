@@ -45,6 +45,19 @@ model_team(
 
 **点名 = 接管同款，不取消绑定**：`models` 里只要命中某个执行组的任一候选，该组就**整组改走点名的那条路由**（主备链只留它）；没被命中的绑定组照常参与；点名里绑定没有的模型作为独立条目追加。想只跑点名的那几家，先到设置里清空/收窄绑定。点名的模型必须能解析，否则**响亮报错并列出可用项**。
 
+## 审查点（审计默认是增量的）
+
+`kind="audit"` 会读「这个仓库上次审到哪个提交」，只把之后的变动交给模型。
+
+- **存哪**：`<workspace>/.model-team/review-points.json`，按项目存、**不进版本历史**
+  （仓库把 `.model-team/` 加进 `.gitignore`）。它是游标不是结论——结论写进项目自己的文档。
+- **怎么用**：默认 `reviewPoint: "auto"`；`"reset"` 清游标强制全量；`"off"` 本次不读不写。
+- **行为**：packet 末尾追加 `REVIEW SCOPE` 段（上一提交、之后的提交与改动文件、聚焦指令）；
+  跑完至少一家成功后把游标推进到被审的 HEAD。
+- **算不出增量就退回全量并说明原因**，绝不假装增量：
+  `no-review-point` / `history-rewritten` / `not-a-git-worktree` / `no-new-commits`。
+- **查看与维护**：`model-team review-point show|reset --workspace <dir>`。
+
 ## CLI harness（可选）
 
 插件内置 9 家无头模式定义：`agent` / `claude` / `pi` / `zcode` / `opencode` / `qoder` / `devin` / `cline` / `grok`；

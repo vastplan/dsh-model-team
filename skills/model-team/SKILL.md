@@ -18,7 +18,11 @@ description: >
 2. **语言**：提交给被测模型的 Task Packet **一律英文**；拿到回复后翻成中文再向用户汇报。
 3. **嵌套保护**：被调模型不得再执行 `model-team`（CLI 会用 `MODEL_TEAM_ACTIVE` 直接退出）。
 4. **数据根**：账本 `~/.model-team/ledger/model-audit-reviews.db`，会话日志 `~/.model-team/runs/<场次ID>/`；
-   可用 `MODEL_TEAM_HOME` 改根，`--db` / `--config` 单次覆盖。绝不把数据落到项目目录。
+   可用 `MODEL_TEAM_HOME` 改根，`--db` / `--config` 单次覆盖。
+   **唯一的例外是审查点**：它记在 `<workspace>/.model-team/review-points.json`，见「一·五」。
+   理由：账本与日志是**跨项目**的调用记录，属于这台机器；审查点是**单个仓库**的审计游标，
+   跟着项目走才不会被别的仓库顶掉，换机器/新克隆也有意义。它同样**不进版本历史**
+   （仓库里把 `.model-team/` 加进 `.gitignore`）——结论应该落在项目自己的文档里。
 
 ## 一、跑一场
 
@@ -30,6 +34,7 @@ model-team run \
   --slice "order-service" \
   --workspace /abs/path/to/repo \
   --models cli-claude/claude-sonnet-5-5,cli-grok/grok-4-7 \
+  --review-point auto \
   --timeout 600
 ```
 
@@ -46,6 +51,61 @@ model-team run \
 - stdout 是 JSON：`{ run_id, kind, ledger, log_dir, quality_eval, next, runs[] }`；
   每条 run 有 `model / provider / status / duration_s / input_tokens / output_tokens / answer / log`。
 - stderr 是进度；`--quiet` 关掉。
+
+## 一·五、审查点（review point）——审计默认是增量的
+
+审计最怕两件事：重复报同一批已经处理过的结论，以及每次都从头读整个仓库。
+审查点解决它：**记住上一次审到哪个提交，下一次只审那之后的新变动。**
+
+### 存在哪
+
+`<workspace>/.model-team/review-points.json`，按项目存。
+
+- **不提交进 git**（仓库里加 `.model-team/` 到 `.gitignore`）。它是**游标**不是**结论**：
+  结论应该落在项目自己的文档里（例如 `docs/progress.md` 的缺口台账），
+  而游标每次审计都会变，提交它只会往产品历史里塞无意义的提交。
+- 用 `MODEL_TEAM_REVIEW_POINTS` 可覆盖路径；没有 `workspace` 时兜底到 `~/.model-team/`。
+
+### 怎么用
+
+DSH 的 `model_team` 工具：`kind="audit"` 时自动生效，无需额外参数。
+
+```jsonc
+{ "kind": "audit", "reviewPoint": "auto" }   // 默认：增量
+{ "kind": "audit", "reviewPoint": "reset" }  // 清掉游标，强制全量
+{ "kind": "audit", "reviewPoint": "off" }    // 本次既不读也不写
+```
+
+CLI：`--review-point auto|reset|off`（默认 auto），另有两个只读/维护子命令：
+
+```bash
+model-team review-point show  --workspace /abs/path/to/repo   # 当前游标 + 下次增量范围
+model-team review-point reset --workspace /abs/path/to/repo   # 清游标，下次全量
+```
+
+### 行为
+
+- 跑之前把 `REVIEW SCOPE` 段追加到 packet 末尾：上一审查点的提交、之后的 N 个提交与
+  M 个改动文件、以及「聚焦这些变动，但跨切面风险仍要报」的指令。
+  `llm` 模式的模型看不到仓库，这段是它唯一知道「审什么」的来源。
+- 跑完之后（至少一家成功）把游标推进到被审的 HEAD。
+- **算不出增量就退回全量，并说明原因**，绝不假装增量：
+  - `no-review-point`：这个工作空间还没审过
+  - `history-rewritten`：记录的提交已不是 HEAD 的祖先（rebase/force-push）
+  - `not-a-git-worktree`：不是 git 仓库
+  - `no-new-commits`：HEAD 就是审查点，没什么可审
+
+### 第一次用
+
+游标为空时是**全量**。如果这个项目之前已经审过，把游标播种到那次审的提交上，
+下一次就自动变成增量：
+
+```bash
+node -e 'import("./src/review-points.js").then((m) => {
+  const ws = "/abs/path/to/repo";
+  m.setReviewPoint(m.resolveReviewPointPath(ws), ws, { commit: "<上次审的 SHA>", reviewedAt: new Date().toISOString(), runId: "seeded" });
+})'
+```
 
 ## 二、对照与收尾
 
@@ -86,6 +146,8 @@ model-team record-outcome --run-id <run_id> --json /tmp/outcome.json --write
 | `model-team backfill --run-id <id> --write` | 中断场次从日志补账 |
 | `model-team refresh-usage --write --only-empty` | 回填 token |
 | `model-team weekly --week current` | 生成周报（`~/.model-team/weekly/<ISO周>/`） |
+| `model-team review-point show` | 看当前审查点与下次增量范围（`--workspace` 指定仓库） |
+| `model-team review-point reset` | 清掉审查点，下次审计退回全量 |
 
 ## 四、模型名怎么写
 

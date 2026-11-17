@@ -24,6 +24,10 @@ import { buildInfo, buildInfoLine } from './src/buildinfo.js';
 import { registerBundledSkill } from './src/skill.js';
 import { listAttachments, readAttachments } from './src/attach.js';
 import {
+  advanceReviewPoint, buildReviewScope, clearReviewPoint, computeReviewDelta,
+  getReviewPoint, resolveReviewPointPath,
+} from './src/review-points.js';
+import {
   clearCliInfoCache, cliCacheSummary, cliCacheUpdatedAt, cliCatalogEntries, configureCliCache,
   defaultCliCachePath, discoverAll, flushCliCache, harnessFor, listHarnesses,
   registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness, touchCliCache,
@@ -830,9 +834,31 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
       );
     }
   }
-  const promptLlm = `${meta.preamble}${packet}\n${attachmentLlm.appendix}`;
+  /**
+   * 审查点：只对 `kind='audit'` 生效。
+   *
+   * 把「上次审到哪个提交」变成这次的范围说明，追加在 packet 后面。`llm` 模式的
+   * 模型看不到仓库，所以增量范围必须由 Host 算好写进正文；`subagent`/`cli` 拿到的
+   * 是同一份说明加上文件清单。
+   *
+   * `reviewPoint='reset'` 强制全量并把游标清掉；`reviewPoint='off'` 本次既不读也不写。
+   */
+  let reviewScope = '';
+  let reviewPlan = null;
+  const reviewMode = String(args.reviewPoint ?? '').trim().toLowerCase();
+  if (kind === 'audit' && workspace && reviewMode !== 'off') {
+    const reviewFile = resolveReviewPointPath(workspace);
+    if (reviewMode === 'reset') clearReviewPoint(reviewFile, workspace);
+    const point = reviewMode === 'reset' ? null : getReviewPoint(reviewFile, workspace);
+    const delta = computeReviewDelta(workspace, point?.commit);
+    reviewScope = buildReviewScope(delta, point);
+    reviewPlan = { file: reviewFile, workspace, delta, runId: args.runId };
+  }
+  const packetInScope = reviewScope ? `${packet}\n${reviewScope}` : packet;
+
+  const promptLlm = `${meta.preamble}${packetInScope}\n${attachmentLlm.appendix}`;
   // subagent 与 CLI 都要「先自己读代码」：有 subagentPreamble 就用它，别再套 llm 的「禁止调工具」。
-  const promptTools = `${meta.subagentPreamble || meta.preamble}${packet}\n${attachmentList.appendix}`;
+  const promptTools = `${meta.subagentPreamble || meta.preamble}${packetInScope}\n${attachmentList.appendix}`;
   /** 场次快照的总体提示词；具体条目仍通过 promptFor 选择正文/清单版本。 */
   const prompt = hasDshLlm ? promptLlm : promptTools;
   /** CLI 条目与 subagent 一样拿「范围清单」；DSH llm 条目拿正文。 */
@@ -855,7 +881,7 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
   if (persistWanted) {
     try {
       runDir = openRunDir(runsRoot, args.runId);
-      snapshotInput(runDir, 'packet.txt', packet);
+      snapshotInput(runDir, 'packet.txt', packetInScope);
       snapshotInput(runDir, 'prompt.md', prompt);
     } catch (error) {
       ctx.logger?.warn?.(`model-team: 场次目录不可写，本次不落会话日志：${error instanceof Error ? error.message : String(error)}`);
@@ -1252,6 +1278,24 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
       })),
     }), { channel: 'log' });
   } catch { /* 快照失败不影响返回值 */ }
+
+  // 审查点推进：只在审计真的跑起来之后写，且失败不掩盖本次结果。
+  if (reviewPlan && reviewPlan.delta?.head) {
+    try {
+      const succeeded = rows.some((row) => row.status === 'done' || row.status === 'success');
+      if (succeeded) {
+        advanceReviewPoint({
+          file: reviewPlan.file,
+          workspace: reviewPlan.workspace,
+          delta: reviewPlan.delta,
+          runId: reviewPlan.runId,
+          commit: reviewPlan.delta.head,
+        });
+      }
+    } catch (error) {
+      ctx.logger?.warn?.(`model-team: 审查点写入失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   // 场次级 mode：所有条目一致才写具体值；组级执行方式不同则记 mixed。
   const modeSet = new Set(candidateEntries.map((entry) => (
@@ -2011,6 +2055,15 @@ export function apply(ctx, config = {}) {
         packet: {
           type: 'string',
           description: 'The self-contained Task Packet (goal, entry points, hard constraints, what was tried, open questions; 1–3K tokens).',
+        },
+        reviewPoint: {
+          type: 'string',
+          enum: ['auto', 'reset', 'off'],
+          description: 'Only for kind="audit". "auto" (default) reviews incrementally: the plugin reads the review '
+            + 'point stored at <workspace>/.model-team/review-points.json and appends a REVIEW SCOPE section listing '
+            + 'only the commits and files added since the last audited commit, then advances the point on success. '
+            + '"reset" clears the point and forces a full review. "off" neither reads nor writes it.',
+          default: 'auto',
         },
         kind: {
           type: 'string',
