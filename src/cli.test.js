@@ -4,6 +4,7 @@
  * 运行：node --test src/cli.test.js
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ import { test } from 'node:test';
 import { flagOf, hasFlag, listFlag, parseArgs } from './cli/args.js';
 import { buildCliPrompt, readPacket } from './cli/run.js';
 import { modelsCheck } from './cli/models.js';
-import { weekWindow } from './cli/commands.js';
+import { dispatchExtra, weekWindow } from './cli/commands.js';
 import { recordFindings, recordOutcome, recomputeSummary, summaryReport } from './cli/ledger-commands.js';
 
 /** 旧 skill 的三张表（字段与真实库一致，便于离线验证）。 */
@@ -203,4 +204,107 @@ test('planFromDsh：没有绑定时退回全部启用组', async () => {
   const catalog = [{ provider: 'cli-grok', id: 'grok-4-7' }, { provider: 'cli-claude', id: 'claude-sonnet-5-5' }];
   const { groups } = planFromDsh(config, 'design', catalog);
   assert.deepEqual(groups.map((group) => group.groupId), ['g1']);
+});
+
+/** 造一个带一次提交的临时仓库：审查点必须靠 git 才算得出增量。 */
+function reviewPointRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'model-team-cli-rp-'));
+  const run = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  run('init', '-q');
+  run('config', 'user.email', 'test@example.com');
+  run('config', 'user.name', 'test');
+  run('config', 'commit.gpgsign', 'false');
+  writeFileSync(join(dir, 'a.txt'), 'one\n');
+  run('add', '.');
+  run('commit', '-q', '-m', 'first commit');
+  return dir;
+}
+
+/** dispatchExtra 把结果写到 stdout；测试里截下来再断言。 */
+async function captureDispatch(argv, config) {
+  const chunks = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  try {
+    const code = await dispatchExtra('review-point', parseArgs(argv), config);
+    return { code, output: chunks.join('') };
+  } finally {
+    process.stdout.write = original;
+  }
+}
+
+test('review-point show：没有游标时说明是全量，并给出原因', async () => {
+  const repo = reviewPointRepo();
+  try {
+    const { code, output } = await captureDispatch(
+      ['review-point', 'show', '--workspace', repo],
+      { ledgerPath: ':memory:' },
+    );
+    assert.equal(code, 0);
+    const parsed = JSON.parse(output);
+    assert.equal(parsed.point, null);
+    assert.equal(parsed.delta.comparable, false);
+    assert.equal(parsed.delta.reason, 'no-review-point');
+    assert.equal(parsed.file, join(repo, '.model-team', 'review-points.json'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('review-point show：有游标时列出增量范围；reset 之后回到全量', async () => {
+  const repo = reviewPointRepo();
+  try {
+    const rp = await import('./review-points.js');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    rp.setReviewPoint(rp.resolveReviewPointPath(repo), repo, { commit: head, runId: 'seeded' });
+
+    const shown = JSON.parse((await captureDispatch(
+      ['review-point', 'show', '--workspace', repo],
+      { ledgerPath: ':memory:' },
+    )).output);
+    assert.equal(shown.point.runId, 'seeded');
+    assert.equal(shown.delta.comparable, true);
+    assert.equal(shown.delta.reason, 'no-new-commits');
+
+    const cleared = JSON.parse((await captureDispatch(
+      ['review-point', 'reset', '--workspace', repo],
+      { ledgerPath: ':memory:' },
+    )).output);
+    assert.equal(cleared.cleared, true);
+
+    const after = JSON.parse((await captureDispatch(
+      ['review-point', 'show', '--workspace', repo],
+      { ledgerPath: ':memory:' },
+    )).output);
+    assert.equal(after.point, null);
+    assert.equal(after.delta.reason, 'no-review-point');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('review-point reset：本来就没有游标时返回 cleared=false，不报错', async () => {
+  const repo = reviewPointRepo();
+  try {
+    const { code, output } = await captureDispatch(
+      ['review-point', 'reset', '--workspace', repo],
+      { ledgerPath: ':memory:' },
+    );
+    assert.equal(code, 0);
+    assert.equal(JSON.parse(output).cleared, false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('review-point：未知子命令要响亮报错', async () => {
+  const repo = reviewPointRepo();
+  try {
+    await assert.rejects(
+      () => captureDispatch(['review-point', 'bogus', '--workspace', repo], { ledgerPath: ':memory:' }),
+      /未知子命令：review-point bogus/,
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
