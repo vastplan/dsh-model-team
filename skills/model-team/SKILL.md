@@ -23,20 +23,30 @@ description: >
    理由：账本与日志是**跨项目**的调用记录，属于这台机器；审查点是**单个仓库**的审计游标，
    跟着项目走才不会被别的仓库顶掉，换机器/新克隆也有意义。它同样**不进版本历史**
    （仓库里把 `.model-team/` 加进 `.gitignore`）——结论应该落在项目自己的文档里。
+5. **默认执行组与失败止损**：除非用户显式点名模型，**不要传 `--models` / `--group`**，
+   一律沿用页面绑定的执行组，禁止擅自拼入配置外模型。单场中部分模型失败或超时，
+   只要已有至少一家成功产出有效结论，直接核证采纳并收尾，**不要为了补齐失败模型反复重跑**。
+6. **防修审循环（准入 + Non-Goals 前置 + 分流熔断）**：
+   - 审计聚焦业务代码、可发布包、核心契约、安全信任链与部署/发版脚本；**不对静态门禁/检查器脚本自身做递归白盒对抗审计**。
+   - `audit` 模式的 Task Packet **必须在开头显式写入 `Scope & Non-Goals` 能力边界声明**，要求模型仅报告真实业务缺陷、契约破坏、生产安全回归、误报或确定性运行时偏差，屏蔽刻意混淆类线索；若是复查轮，限定「只检验本轮修复是否引入 P0/P1 新回归或误报，禁止扩面挖存量」。
+   - 同一批改动最多做 **1 轮修复 + 最多 1 轮聚焦复查**；`record-findings` 的 `verdict="成立"` 不等于必须立刻返修，仅 P0/P1 触发返修，其余记入项目缺口或以「符合 Non-Goals」封箱。
 
 ## 一、跑一场
 
 ```bash
-# 1) 写 Task Packet（英文，自包含：目标 / 入口 file:line + 关键代码 / 硬约束 / 已试待决）
+# 1) 写 Task Packet（英文，自包含：开头必写 Scope & Non-Goals 能力边界与复查范围 / 目标 / 入口 file:line + 关键代码 / 硬约束 / 已试待决）
+# 2) 默认不传 --models / --group，直接沿用页面绑定的执行组；仅用户点名模型时再追加 --models
 model-team run \
   --kind audit \
   --packet /tmp/packet.md \
   --slice "order-service" \
   --workspace /abs/path/to/repo \
-  --models cli-claude/claude-sonnet-5-5,cli-grok/grok-4-7 \
   --review-point auto \
-  --timeout 600
+  --timeout 1200
 ```
+
+> `--timeout` 不要给 600s：默认执行组里的 devin 正常单场 400～900s，600s 会把正常场次掐断
+> （账本表现为 `退出码 124`）。给 ≥900s，或干脆不传（默认不限时）。
 
 - `--kind`：`audit`（事后审计，默认）/ `design`（设计分叉，2～4 个方向、禁止拍板）/ `reason`（专责推理）。
 - **模型从哪来（优先级从高到低）**：
@@ -123,6 +133,7 @@ model-team record-findings --run-id <run_id> --json /tmp/findings.json --write
 
 - `claimed`：`缺陷`（审计）/ `方向`（分叉）/ `方案`（推理）；`severity` 1～5。
 - `verdict`：`成立` / `不成立` / `不采用` / `待验证`。
+- **分流落账**：`verdict="成立"` 只代表反例属实，不自动触发返修；`action` 按实际分流填写（如 `"已修 <sha>"` / `"记入缺口 <ID>"` / `"符合 Non-Goals 封箱"`），仅 P0/P1 立刻返修。
 - 不带 `--write` 是演练；`model` 必须是本场参评模型（会校验）。
 - 用户选定方案后再跑 `record-outcome`：
 

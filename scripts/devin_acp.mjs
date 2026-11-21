@@ -40,6 +40,14 @@ child.stderr.on("data", (chunk) => {
 let buffer = "";
 let sessionId = "";
 let answer = "";
+/** 当前 `session/prompt` 的请求 id；续问时递增（devin 用同一个方法，id 不能重复）。 */
+let promptId = 4;
+/** 空回合续问次数：devin 明确说 empty_response 可重试（"Send a message to continue"）。 */
+let continues = 0;
+const MAX_CONTINUES = 2;
+const CONTINUE_NUDGE =
+  "Your previous turn ended without a response. Please provide your final answer now "
+  + "and do not call more tools.";
 const usage = {};
 const cost = {};
 let finished = false;
@@ -82,13 +90,30 @@ function handle(message) {
     }
     if (message.id === 3) {
       if (message.error) return fail(`ACP 切只读档（${mode}）失败：${JSON.stringify(message.error)}`);
-      send({ jsonrpc: "2.0", id: 4, method: "session/prompt", params: {
+      send({ jsonrpc: "2.0", id: promptId, method: "session/prompt", params: {
         sessionId, prompt: [{ type: "text", text: prompt }],
       } });
       return;
     }
-    if (message.id === 4) {
-      if (message.error) return fail(`ACP 会话失败：${JSON.stringify(message.error)}`);
+    if (message.id === promptId) {
+      if (message.error) {
+        // devin 的「模型结束回合但没给正文」是可重试错误（`cognition.ai/errorKind=empty_response`，
+        // `retryable: true`，报文自己写着 "Send a message to continue"）。
+        // 不续问就会把一次正常的长任务判成失败——近 45 天 18 次失败里有 6 次是它。
+        const data = message.error.data && typeof message.error.data === "object" ? message.error.data : {};
+        const kind = String(data["cognition.ai/errorKind"] ?? "");
+        const retryable = data["cognition.ai/retryable"] === true;
+        const emptyTurn = kind === "empty_response" || /without a response/i.test(String(message.error.message ?? ""));
+        if ((emptyTurn || retryable) && continues < MAX_CONTINUES) {
+          continues += 1;
+          promptId += 1;
+          send({ jsonrpc: "2.0", id: promptId, method: "session/prompt", params: {
+            sessionId, prompt: [{ type: "text", text: CONTINUE_NUDGE }],
+          } });
+          return;
+        }
+        return fail(`ACP 会话失败：${JSON.stringify(message.error)}`);
+      }
       finished = true;
       const resultUsage = message.result?.usage ?? {};
       const money = moneyFrom(resultUsage) ?? moneyFrom(message.result?._meta) ?? moneyFrom(message.result);

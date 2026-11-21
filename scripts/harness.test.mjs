@@ -4,11 +4,15 @@
  * 运行：node --test scripts/harness.test.mjs
  */
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 
 import {
@@ -656,4 +660,91 @@ test('agy stream-json：status=ERROR 时 error 带原因（退出码仍是 0）'
   const out = parseOutput(raw, 'take-last');
   assert.equal(out.text, '');
   assert.match(out.error, /User location is not supported/);
+});
+
+/** 造一个假 ACP server：第一次 session/prompt 回 empty_response，第二次回正文。 */
+function makeFakeDevin(dir) {
+  const server = join(dir, 'fake-acp.mjs');
+  writeFileSync(server, `
+import { createInterface } from 'node:readline';
+const rl = createInterface({ input: process.stdin });
+let prompts = 0;
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+rl.on('line', (line) => {
+  let msg; try { msg = JSON.parse(line); } catch { return; }
+  if (msg.method === 'initialize') return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1 } });
+  if (msg.method === 'session/new') return send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 's1' } });
+  if (msg.method === 'session/set_mode') return send({ jsonrpc: '2.0', id: msg.id, result: {} });
+  if (msg.method === 'session/prompt') {
+    prompts += 1;
+    if (prompts === 1) {
+      return send({ jsonrpc: '2.0', id: msg.id, error: {
+        code: -32021, message: 'The model ended its turn without a response. Send a message to continue.',
+        data: { 'cognition.ai/errorKind': 'empty_response', 'cognition.ai/retryable': true },
+      } });
+    }
+    send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: {
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'OK-DEVIN' },
+    } } });
+    return send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn', usage: { inputTokens: 11, outputTokens: 3 } } });
+  }
+  send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'not supported' } });
+});
+`, 'utf8');
+  const wrapper = join(dir, 'devin');
+  writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${server}" "$@"\n`, { mode: 0o755 });
+  return wrapper;
+}
+
+test('devin ACP：empty_response 自动续问，最终拿到正文', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'model-team-devin-'));
+  try {
+    const bin = makeFakeDevin(dir);
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [join(HERE, '..', 'scripts', 'devin_acp.mjs'), '--model', 'swe-2-max', '--', 'PROMPT'],
+      { env: { ...process.env, DEVIN_BIN: bin }, timeout: 30000, encoding: 'utf8' },
+    );
+    const events = stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const result = events.find((event) => event.type === 'result');
+    assert.ok(result, '应产出 result 事件');
+    assert.equal(result.result, 'OK-DEVIN');
+    assert.equal(result.usage.inputTokens, 11);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('devin ACP：续问有上限，连续 empty_response 仍判失败', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'model-team-devin-'));
+  try {
+    const server = join(dir, 'always-empty.mjs');
+    writeFileSync(server, `
+import { createInterface } from 'node:readline';
+const rl = createInterface({ input: process.stdin });
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+rl.on('line', (line) => {
+  let msg; try { msg = JSON.parse(line); } catch { return; }
+  if (msg.method === 'initialize') return send({ jsonrpc: '2.0', id: msg.id, result: {} });
+  if (msg.method === 'session/new') return send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 's1' } });
+  if (msg.method === 'session/set_mode') return send({ jsonrpc: '2.0', id: msg.id, result: {} });
+  if (msg.method === 'session/prompt') return send({ jsonrpc: '2.0', id: msg.id, error: {
+    code: -32021, message: 'The model ended its turn without a response. Send a message to continue.',
+    data: { 'cognition.ai/errorKind': 'empty_response', 'cognition.ai/retryable': true } } });
+  send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'no' } });
+});
+`, 'utf8');
+    const wrapper = join(dir, 'devin');
+    writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${server}" "$@"\n`, { mode: 0o755 });
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        [join(HERE, '..', 'scripts', 'devin_acp.mjs'), '--model', 'swe-2-max', '--', 'PROMPT'],
+        { env: { ...process.env, DEVIN_BIN: wrapper }, timeout: 30000, encoding: 'utf8' },
+      ),
+      (error) => /empty_response|without a response/i.test(String(error.stderr ?? error.message)),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

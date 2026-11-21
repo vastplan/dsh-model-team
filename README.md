@@ -345,10 +345,16 @@ model-team summary     # 按模型汇总质量
 - 周报与报告依赖「保存数据」总开关；关着时明确报错，不生成空报告。
 - CLI harness 的 token 用量取决于该 CLI 的事件流；拿不到时按未采集记 0（与 subagent 同口径）；
   CLI 未安装/未登录会在该行失败，并带上 stderr 尾部。
-- **审查点只在两套新实现里**：DSH 插件（`src/review-points.js` + `model_team` 工具）与本插件的
-  `model-team` CLI。`development/skill-project/model-team` 那套独立的 TypeScript CLI
-  （`node dist/cli.js`，供其他 harness 用）**没有**这个机制，它的 SKILL.md 也没有写——
-  要给它加，得先在那套实现里落代码，不能只补文档。
+- **devin 单场耗时 400～900 秒**（近 30 天成功调用均值 387s，最长 ~900s）。
+  调用方若把 `--timeout` 设成 600s 会把正常场次掐断：账本里表现为 `退出码 124` 或
+  `time.idle=643s` 的 stderr 尾部。**规避：devin 的 `--timeout` 给 ≥900s，或干脆不传**
+  （CLI 默认不限时；DSH 插件默认 1500s）。闭合条件：devin 侧响应时间稳定降到 600s 以内。
+- **devin `remote_config` 拉取失败**（`N windsurf_api_client::remote_config: remote config
+  revalidation failed`）属于 Devin CLI 自己的网络/配置问题，插件只能原样报错。
+  规避：重试；持续出现时检查 Devin 登录态与网络。闭合条件：Devin 官方修复或本机网络恢复。
+- 审查点由三处共享同一个文件格式（`<workspace>/.model-team/review-points.json`）：
+  本插件的 `model_team` 工具、本插件的 `model-team` CLI、以及 `development/skill-project/model-team`
+  那套独立 TypeScript CLI（`node dist/cli.js`）。**改格式要三处一起改**，否则一边写的游标另一边读不懂。
 
 ## 目录结构
 
