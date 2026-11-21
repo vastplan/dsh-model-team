@@ -308,3 +308,55 @@ test('review-point：未知子命令要响亮报错', async () => {
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('createProgressPrinter：start / phase 限流 / done', async () => {
+  const { createProgressPrinter } = await import('./cli/progress.js');
+  const lines = [];
+  let clock = 0;
+  const print = createProgressPrinter({
+    write: (line) => lines.push(line),
+    now: () => clock,
+    intervalMs: 3000,
+  });
+  print({ type: 'start', model: 'cli-x/a', tool: 'x' });
+  clock = 10;
+  print({ type: 'phase', model: 'cli-x/a', phase: 'thinking', snippet: '想' });
+  clock = 100;
+  print({ type: 'phase', model: 'cli-x/a', phase: 'thinking', snippet: '还在想' }); // 限流丢弃
+  clock = 200;
+  print({ type: 'phase', model: 'cli-x/a', phase: 'answering', snippet: '正在回答' }); // 阶段切换必打
+  clock = 3500;
+  print({ type: 'phase', model: 'cli-x/a', phase: 'answering', snippet: '继续回答' }); // 超过间隔
+  print({ type: 'done', model: 'cli-x/a', status: 'done', seconds: 12 });
+  print({ type: 'done', model: 'cli-x/b', status: 'failed', seconds: 3 });
+
+  assert.equal(lines[0], '▶ cli-x/a · x');
+  assert.match(lines[1], /\[thinking\] 想/);
+  assert.equal(lines.filter((line) => /还在想/.test(line)).length, 0, '同阶段同窗口要限流');
+  assert.match(lines[2], /\[answering\] 正在回答/);
+  assert.match(lines[3], /\[answering\] 继续回答/);
+  assert.equal(lines[4], '  ✔ cli-x/a 12s');
+  assert.equal(lines[5], '  ✘ cli-x/b 3s (failed)');
+});
+
+test('createProgressPrinter：quiet 全关，no-stream 只留起止', async () => {
+  const { createProgressPrinter } = await import('./cli/progress.js');
+  const quietLines = [];
+  createProgressPrinter({ write: (line) => quietLines.push(line), quiet: true })({ type: 'start', model: 'm' });
+  assert.deepEqual(quietLines, []);
+
+  const lines = [];
+  const print = createProgressPrinter({ write: (line) => lines.push(line), stream: false });
+  print({ type: 'start', model: 'm' });
+  print({ type: 'phase', model: 'm', phase: 'thinking', snippet: 'x' });
+  print({ type: 'done', model: 'm', status: 'done', seconds: 1 });
+  assert.deepEqual(lines, ['▶ m', '  ✔ m 1s']);
+});
+
+test('clipSnippet：压成单行并截尾', async () => {
+  const { clipSnippet } = await import('./cli/progress.js');
+  assert.equal(clipSnippet('  a\n\nb   c '), 'a b c');
+  assert.equal(clipSnippet(''), '');
+  const long = 'x'.repeat(100);
+  assert.equal(clipSnippet(long, 10), `…${'x'.repeat(10)}`);
+});

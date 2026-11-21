@@ -13,7 +13,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
@@ -29,8 +29,8 @@ import {
 } from './src/review-points.js';
 import {
   clearCliInfoCache, cliCacheSummary, cliCacheUpdatedAt, cliCatalogEntries, configureCliCache,
-  defaultCliCachePath, discoverAll, flushCliCache, harnessFor, listHarnesses,
-  registerBuiltinHarnesses, registerConfiguredHarnesses, runHarness, touchCliCache,
+  defaultCliCachePath, discoverAll, flushCliCache, listHarnesses,
+  registerBuiltinHarnesses, registerConfiguredHarnesses, touchCliCache,
 } from './src/harness/index.js?v=0.7.3';
 import { harnessAvailable } from './src/harness/availability.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeBalanceLog, writeSessionLog } from './src/sessionlog.js';
@@ -45,6 +45,7 @@ import { factsForModel, WEEKLY_PREAMBLE } from './src/weekly.js';
 import { reportsDir, writeReport } from './src/report.js';
 import { publishReports } from './src/publish.js';
 import { validateTestRun } from './src/selftest.js';
+import { callHarnessEntry, runGroupChain } from './src/runner.js?v=0.7.3';
 
 /**
  * 本入口模块被**求值**的时刻。
@@ -452,31 +453,24 @@ async function callSubagent(ctx, subagents, entry, options, signal, parentAgent)
 }
 
 /**
- * 一次 CLI harness 调用：把条目翻译成协议定义能吃的输入，交给 `runHarness`。
+ * 一次 CLI harness 调用：薄适配，真正的实现在 `src/runner.js`（与 `model-team` CLI 共用）。
  *
  * CLI 的 `cwd` 必须是绝对 workspace（Host 进程的 cwd 不是项目目录）；
- * 取消、超时、看门狗、进度都由 `runHarness` 统一处理，返回形状与 `callLlm` 对齐。
+ * 取消、超时、看门狗、进度都由执行核心统一处理，返回形状与 `callLlm` 对齐。
  */
 async function callCli(ctx, entry, options, signal) {
-  const definition = harnessFor(entry.harness);
-  const workspace = String(options.workspace ?? '').trim();
-  if (!workspace || !isAbsolute(workspace)) {
-    throw new Error(
-      `CLI 条目「${entry.name}」需要绝对 workspace（作为 CLI 的 cwd）：${workspace || '(未给)'}；`
-      + '请在 model_team 里传 workspace=<项目绝对路径>',
-    );
-  }
-  return await runHarness({
+  // 与 `model-team` CLI 共用同一个执行核心：workspace 校验、参数映射、错误形状只此一份。
+  return await callHarnessEntry({
     ctx,
-    def: definition,
     entry,
     prompt: options.prompt,
-    workspace,
+    workspace: options.workspace,
     tmpDir: options.tmpDir,
     signal,
     onPhase: options.onPhase,
     timeoutMs: options.timeoutMs,
     silenceMs: options.silenceMs,
+    label: entry.name,
   });
 }
 
@@ -1205,38 +1199,32 @@ export async function runTeam(ctx, handle, args, config, configStore, signal, pa
     : runGroup(plan)));
 
   async function runGroup(plan) {
-    const tried = [];
-    // 备选**不能提前播报成「等待」**。
-    //
-    // 早先组一开始就把所有候选播成 `queued`，结果主力成功时备选永远不会跑，
-    // 那条「排队」却一直挂在监控窗里——真机看到「一个排队的 K3」就是这么来的
-    // （`g-kimi-k3` 的备选是 `devin/kimi-k3`）。
-    // 正确做法：只有**主力失败、备选真的要被启用时**，才在它启动前一刻播一次等待；
-    // 从未被启用的候选不留任何进度行。
-    for (const [index, entry] of plan.candidates.entries()) {
-      // 只标序号，不区分「主力/备选」：顺序本身就是回落顺序。
-      if (index > 0) {
-        // 走到这里说明前一个候选失败了，这一个即将被启用——此刻它确实在排队。
-        handle.append(teamProgressLine({
-          model: entry.model,
-          provider: entry.provider,
-          name: entry.name,
-          reasoningEffort: entry.reasoningEffort,
-          label: `${plan.group.name} · ${index + 1}`,
-          groupId: plan.group.groupId,
-          status: 'queued',
-          phase: 'queued',
-          tail: '上一跳失败，准备回落',
-        }), { channel: 'log' });
-      }
-      const row = await runCandidate(entry, `${plan.group.name} · ${index + 1}`, plan.group.groupId);
-      tried.push(row);
-      if (row.status === 'done') break;
-      if (signal?.aborted) break;
-    }
-    const winner = tried.find((row) => row.status === 'done');
+    // 组内回落语义由 `src/runner.js` 统一实现（CLI 模式同一份）：
+    // 第一个 `done` 即停；只有**真的要启用备选**时才播一次「准备回落」。
+    const chain = await runGroupChain(
+      plan.candidates,
+      (entry, index) => runCandidate(entry, `${plan.group.name} · ${index + 1}`, plan.group.groupId),
+      {
+        onBeforeFallback: (entry, index) => {
+          handle.append(teamProgressLine({
+            model: entry.model,
+            provider: entry.provider,
+            name: entry.name,
+            reasoningEffort: entry.reasoningEffort,
+            label: `${plan.group.name} · ${index + 1}`,
+            groupId: plan.group.groupId,
+            status: 'queued',
+            phase: 'queued',
+            tail: '上一跳失败，准备回落',
+          }), { channel: 'log' });
+        },
+        shouldStop: () => signal?.aborted === true,
+      },
+    );
+    const tried = chain.tried;
+    const winner = chain.winner;
     // 落账本时只记真正生效的那一个；没被启用的后面几条不占账本行。
-    const recorded = winner ?? tried[tried.length - 1];
+    const recorded = chain.recorded;
     // 进度窗的槽位 id **固定用名册里主力那条**，不跟着胜出的备选变。
     // 否则回落成功时：主力行永远停在 failed，备选又另起一行，一个组显示成两条
     // （真机：监控窗里一条假失败 + 一条名册外多出来的行）。

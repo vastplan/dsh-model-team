@@ -15,7 +15,7 @@ import { openLedger, packetHash, resolveLedgerPath } from '../ledger.js';
 import { dataRoot } from './config.js';
 import { localStamp, newRunId, openRunDir, snapshotInput, writeSessionLog } from '../sessionlog.js';
 import { resolveTeam, joinEffort } from '../team.js';
-import { harnessFor, runHarness } from '../harness/index.js?v=0.7.3';
+import { callHarnessEntry, runGroupChain } from '../runner.js?v=0.7.3';
 
 /** 三类活动的开场提示词（与插件内 `KINDS` 同一口径）。 */
 export const CLI_KINDS = {
@@ -177,18 +177,15 @@ export async function runCliTeam(options) {
     let error = '';
     const tmpDir = mkdtempSync(join(tmpdir(), 'model-team-'));
     try {
-      result = await runHarness({
-        def: harnessFor(entry.harness),
-        entry: {
-          harnessModel: entry.harnessModel ?? entry.model,
-          harnessProvider: entry.harnessProvider,
-          reasoningEffort: entry.reasoningEffort,
-        },
+      // 与插件模式共用同一个执行核心（workspace 校验、参数映射、错误形状都一致）。
+      result = await callHarnessEntry({
+        entry,
         prompt,
         workspace,
         tmpDir,
         timeoutMs,
-        onPhase: (phase) => emit({ type: 'phase', model: label, ...phase }),
+        label: `${entry.provider}/${entry.model}`,
+        onPhase: (phaseName, snippet) => emit({ type: 'phase', model: label, phase: phaseName, snippet }),
       });
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
@@ -240,20 +237,18 @@ export async function runCliTeam(options) {
 
   // 每个执行组内部按候选顺序回落：第一个有结果的即停（与插件页语义一致）。
   const rows = await Promise.all(plan.map(async (group) => {
-    const tried = [];
-    let winner = null;
-    for (const entry of group.entries) {
-      const row = await runOne(entry);
-      tried.push({
-        model: `${entry.provider}/${entry.model}`,
-        effort: entry.reasoningEffort ?? '',
+    const chain = await runGroupChain(group.entries, (entry) => runOne(entry));
+    const result = {
+      ...chain.recorded,
+      groupId: group.groupId ?? '',
+      groupName: group.name ?? '',
+      tried: chain.tried.map((row) => ({
+        model: `${row.provider}/${row.model}`,
+        effort: row.reasoningEffort ?? '',
         status: row.status,
         seconds: row.seconds,
-      });
-      winner = row;
-      if (row.status === 'done') break;
-    }
-    const result = { ...winner, groupId: group.groupId ?? '', groupName: group.name ?? '', tried };
+      })),
+    };
     emit({ type: 'done', model: `${result.provider}/${result.model}`, status: result.status, seconds: result.seconds, group: result.groupName });
     return result;
   }));

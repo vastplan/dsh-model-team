@@ -75,6 +75,7 @@ export async function main(argv) {
         const { buildCliCatalog } = await import('./catalog.js');
         const { readDshConfig, planFromDsh } = await import('./dsh-config.js');
         const { listFlag, flagOf, hasFlag, numberFlag } = await import('./args.js');
+        const { createProgressPrinter } = await import('./progress.js');
         const { catalog } = await buildCliCatalog(config, { quiet: hasFlag(parsed, '--quiet') });
         const kind = flagOf(parsed, '--kind', 'audit');
         const models = listFlag(parsed, '--models');
@@ -139,11 +140,10 @@ export async function main(argv) {
           timeoutSec: numberFlag(parsed, '--timeout'),
           ledgerPath: flagOf(parsed, '--db', config.ledgerPath),
           runsRoot: config.runsRoot,
-          onProgress: (event) => {
-            if (hasFlag(parsed, '--quiet')) return;
-            if (event.type === 'start') process.stderr.write(`▶ ${event.model}\n`);
-            if (event.type === 'done') process.stderr.write(`  ${event.status === 'done' ? '✔' : '✘'} ${event.model} ${event.seconds}s\n`);
-          },
+          onProgress: createProgressPrinter({
+            quiet: hasFlag(parsed, '--quiet'),
+            stream: !hasFlag(parsed, '--no-stream'),
+          }),
         });
         if (reviewPlan && reviewPlan.delta?.head && outcome.runs?.some((run) => run.status === 'done')) {
           const { advanceReviewPoint } = await import('../review-points.js');
